@@ -338,3 +338,36 @@ test('DOM bindings read form values on submit, clear auth input, and remove list
   assert.equal(f.get('save-form').listeners.size, 0);
   assert.equal(f.get('auth-form').listeners.size, 0);
 });
+
+test('reset clears an invalidated deferred resolve spinner before NeedsLogin', async () => {
+  const wait = deferred();
+  const states = ['Running', 'NeedsLogin', 'Running'];
+  let resolves = 0;
+  const f = fixture({ search: '?resolve=docs', reply: method => {
+    if (method === 'status') return status(states.shift());
+    if (method === 'resolve') return ++resolves === 1 ? wait.promise : { redirect: 'https://example.com/docs' };
+    return { ok: true };
+  } });
+  const starting = f.controller.start();
+  await tick();
+  assert.equal(f.last.resolving, true);
+  const resetting = f.handlers.reset();
+  assert.equal(f.last.busy, true);
+  wait.resolve({ pending: true });
+  await Promise.all([starting, resetting]);
+  assert.equal(f.last.state, 'NeedsLogin');
+  assert.equal(f.last.resolving, false);
+  assert.equal(f.last.connecting, false);
+  assert.equal(f.last.busy, false);
+  assert.equal(f.last.showAuthKey, true);
+  const dom = documentFixture();
+  createDOMView(dom.document).render(f.last);
+  assert.equal(dom.get('status').textContent, 'Log in to Tailscale');
+  assert.equal(dom.get('status').dataset.connecting, 'false');
+  assert.equal(dom.get('main').attributes['aria-busy'], 'false');
+  assert.equal(resolves, 1);
+  await f.poll();
+  assert.equal(resolves, 2);
+  assert.equal(f.last.resolving, false);
+  f.controller.dispose();
+});

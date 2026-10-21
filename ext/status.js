@@ -83,6 +83,7 @@ export function createStatusController({ rpc, view, location, activeTab, setTime
     if (disposed || model.busy) return;
     model.busy = true;
     model.connecting = false;
+    model.resolving = false;
     model.error = model.warning = model.message = '';
     paused = false;
     generation++;
