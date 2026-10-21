@@ -2,7 +2,10 @@ module golink-chrome-extension
 
 go 1.27.3
 
-require github.com/tailscale/golink v1.0.1-0.20261021144816-8b59870a054f
+require (
+	github.com/tailscale/golink v1.0.1-0.20261021144816-8b59870a054f
+	tailscale.com v1.104.2
+)
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -65,5 +68,4 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.39.1 // indirect
-	tailscale.com v1.104.2 // indirect
 )
