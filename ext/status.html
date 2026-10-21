@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Golink</title>
+  <link rel="stylesheet" href="status.css">
+</head>
+<body>
+  <main id="main" aria-busy="true">
+    <h1>Golink</h1>
+    <p id="status" role="status" aria-live="polite" data-connecting="true">Connecting…</p>
+    <p id="identity" hidden></p>
+    <p id="reachability" hidden></p>
+    <p id="message" role="status" hidden></p>
+    <p id="warning" role="status" hidden></p>
+    <section id="login-panel" aria-label="Tailscale login" hidden>
+      <button id="login" type="button">Log in</button>
+      <form id="auth-form" hidden>
+        <label for="auth-key">Tailscale auth key</label>
+        <input id="auth-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required aria-describedby="auth-help">
+        <p id="auth-help" class="help">The key is used once to register this device.</p>
+        <button type="submit">Use auth key</button>
+      </form>
+    </section>
+    <form id="save-form" hidden>
+      <h2>Save a go link</h2>
+      <label for="short">Short name</label>
+      <input id="short" required placeholder="docs" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <label for="long">Target URL</label>
+      <input id="long" type="url" required placeholder="https://example.com" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button type="submit">Save link</button>
+    </form>
+    <section id="ui-panel" aria-labelledby="ui-heading" hidden>
+      <h2 id="ui-heading">Open golink's web UI</h2>
+      <p id="ui-message"></p>
+      <p id="ui-path" class="path"></p>
+      <div id="cached-link" hidden>
+        <h3>Cached link</h3>
+        <dl>
+          <dt>Short name</dt><dd id="cached-short"></dd>
+          <dt>Target URL</dt><dd id="cached-long"></dd>
+          <dt>Owner</dt><dd id="cached-owner"></dd>
+        </dl>
+      </div>
+      <p id="no-cached-link" hidden>This link is not in the local cache.</p>
+    </section>
+    <p id="error" role="alert" hidden></p>
+    <div class="actions">
+      <button id="retry" type="button" hidden>Try again</button>
+      <button id="logout" class="secondary" type="button" hidden>Log out</button>
+      <button id="reset" class="secondary" type="button" hidden>Reset device</button>
+    </div>
+    <details>
+      <summary>Connection settings</summary>
+      <form id="settings-form">
+        <label for="golink-host">Golink host</label>
+        <input id="golink-host" placeholder="go" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="host-help">
+        <p id="host-help" class="help">Use a host name, such as go.example.ts.net, if the short name go does not resolve.</p>
+        <label for="control-url">Tailscale control URL</label>
+        <input id="control-url" type="url" placeholder="https://controlplane.tailscale.com" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="settings-help">
+        <p id="settings-help" class="help">Blank fields use the defaults shown above. Saving reconnects this device with its existing identity.</p>
+        <button type="submit">Save settings</button>
+      </form>
+    </details>
+  </main>
+  <script type="module" src="status.js"></script>
+</body>
+</html>
