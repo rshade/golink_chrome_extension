@@ -108,20 +108,33 @@ func (c *Client) Links(ctx context.Context) ([]Link, error) {
 		return nil, responseError(resp)
 	}
 	links := []Link{}
-	decoder := json.NewDecoder(resp.Body)
+	decoder := json.NewDecoder(exportReader{resp.Body})
 	for {
 		var link Link
 		if err := decoder.Decode(&link); err != nil {
 			if errors.Is(err, io.EOF) {
 				return links, nil
 			}
-			if isTimeout(err) {
-				return nil, transportError(err)
+			var readErr *Error
+			if errors.As(err, &readErr) {
+				return nil, readErr
 			}
 			return nil, &Error{Kind: "http", Message: "decode golink export: " + err.Error()}
 		}
 		links = append(links, link)
 	}
+}
+
+// Classify body read failures before decoding, so malformed JSON ending at EOF
+// remains an HTTP error while stream failures retain their transport error kind.
+type exportReader struct{ io.Reader }
+
+func (r exportReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, transportError(err)
+	}
+	return n, err
 }
 
 func (c *Client) request(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {

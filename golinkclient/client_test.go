@@ -283,6 +283,8 @@ func TestLinksExport(t *testing.T) {
 		{"empty", "\n", 0, false},
 		{"large record", fmt.Sprintf("{\"Short\":\"big\",\"Long\":%q,\"Owner\":\"owner@example.com\"}\n", long), 1, false},
 		{"malformed record", "{\"Short\":\"ok\"}\n{broken}", 0, true},
+		{"wrong field type", "{\"Short\":23}", 0, true},
+		{"incomplete record", "{\"Short\":", 0, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := stubClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -376,5 +378,38 @@ func TestBodiesAreClosedAndHTTPErrorsAreBounded(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
+
+func TestLinksBodyReadErrors(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		err  error
+		kind string
+	}{
+		{"connection reset", &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}, "unreachable"},
+		{"unexpected EOF from transport", io.ErrUnexpectedEOF, "unreachable"},
+		{"other body read failure", errors.New("broken response stream"), "unreachable"},
+		{"deadline", fmt.Errorf("wrapped: %w", context.DeadlineExceeded), "timeout"},
+		{"socket timeout", timeoutError{}, "timeout"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := &trackingBody{Reader: io.MultiReader(
+				strings.NewReader("{\"Short\":\"docs\",\"Long\":\"https://example.com\",\"Owner\":\"owner@example.com\"}\n"),
+				failingReader{err: tt.err},
+			)}
+			c := &Client{Host: "go", HTTP: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body}, nil
+			})}}
+			_, err := c.Links(context.Background())
+			if !body.closed {
+				t.Fatal("failed export response body was not closed")
+			}
+			assertKind(t, err, tt.kind)
+		})
 	}
 }
