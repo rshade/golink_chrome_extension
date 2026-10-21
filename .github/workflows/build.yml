@@ -1,0 +1,41 @@
+name: build
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '23 9 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        deps: ${{ github.event_name == 'schedule' && fromJSON('["pinned","latest"]') || fromJSON('["pinned"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - if: matrix.deps == 'latest'
+        name: Try latest Tailscale internals
+        run: |
+          go get tailscale.com@latest
+          go mod tidy
+      - run: go test ./...
+      - run: ./build.sh
+      - run: node scripts/wasm-smoke.cjs
+      - run: node --test
+      - name: Exclude server and SQLite from WASM
+        shell: bash
+        run: |
+          GOOS=js GOARCH=wasm go list -deps ./wasm > /tmp/wasm-deps.txt
+          if grep -E '^(github.com/tailscale/golink|modernc.org/sqlite)(/|$)' /tmp/wasm-deps.txt; then
+            exit 1
+          fi
