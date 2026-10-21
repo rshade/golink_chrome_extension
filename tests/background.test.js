@@ -353,3 +353,40 @@ test('real worker registration routes durable writes through lifecycle without d
   assert.deepEqual(f.local.data.tsState.values, {});
   assert.equal(responses.some(([message, reply]) => message.type === 'stateWrite' && reply.value.applied === true), true);
 });
+
+for (const [method, args] of [
+  ['configure', [{ golinkHost: 'go.example.ts.net' }]],
+  ['authKey', ['tskey-replacement']],
+]) {
+  test(`${method} refreshes once when replacement Running arrives before restart completes`, async () => {
+    const acknowledged = deferred(), finishRestart = deferred();
+    const links = [{ short: 'replacement', long: 'https://replacement.example', owner: 'test' }];
+    const f = fixture({
+      cache: { fetchedAt: 999_999, links: [{ short: 'old', long: 'https://old.example', owner: 'test' }] },
+      node: {
+        links: () => links,
+        async restart(options) {
+          const current = f.local.data.tsState;
+          f.local.data.tsState = { epoch: current.epoch + 1, values: options.clear ? {} : current.values };
+          if (options.clear) delete f.local.data.linksCache;
+          const event = { type: 'state', state: 'Running', epoch: current.epoch + 1 };
+          assert.deepEqual(await f.offscreen(event), { ok: true, value: { accepted: true } });
+          assert.deepEqual(await f.offscreen(event), { ok: true, value: { accepted: true } });
+          acknowledged.resolve();
+          await finishRestart.promise;
+          return { ok: true };
+        },
+      },
+    });
+    const replacing = f.page(method, args);
+    await acknowledged.promise;
+    assert.equal(f.calls.filter(([name]) => name === 'links').length, 0);
+    assert.equal(f.local.data.linksCache, undefined);
+    finishRestart.resolve();
+    assert.deepEqual(await replacing, { ok: true, value: { ok: true } });
+    await tick();
+    assert.deepEqual(f.local.data.linksCache, { fetchedAt: 1_000_000, links });
+    assert.equal(f.calls.filter(([name]) => name === 'links').length, 1);
+    assert.equal(f.calls.some(([name]) => name === 'status' || name === 'resolve'), false);
+  });
+}

@@ -121,7 +121,11 @@ export function createBackground({ chrome, lifecycle, store, now = Date.now }) {
       return lifecycle.restart(options);
     });
     replacements = request.catch(() => {});
-    return request.finally(() => { replacing--; });
+    return request.finally(() => {
+      replacing--;
+      // A Running callback can acknowledge before restart releases its gate.
+      if (!replacing && lastState === 'Running') refreshCache({ force: true }).catch(() => {});
+    });
   }
   function validatePage(sender) {
     let url;
