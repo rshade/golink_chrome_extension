@@ -14,8 +14,14 @@ function storage(initial = {}) {
 function fixture({ cache, session, node = {}, handleEvent } = {}) {
   const local = storage({ tsState: { epoch: 1, values: {} }, hostname: 'golink-ext-aabbcc', golinkHost: 'go', controlURL: 'https://controlplane.tailscale.com', ...(cache ? { linksCache: cache } : {}) });
   const calls = [], tabs = [], rules = [];
+  const contexts = [{ contextType: 'TAB', contextId: 'status-context', documentId: 'status-document', documentUrl: 'chrome-extension://extension/status.html?resolve=foo', documentOrigin: 'chrome-extension://extension', frameId: 0, tabId: 42, windowId: 1, incognito: false }];
   const chrome = {
-    runtime: { id: 'extension', getURL: path => 'chrome-extension://extension/' + path, onMessage: event(), onInstalled: event(), onStartup: event() },
+    runtime: { id: 'extension', getURL: path => 'chrome-extension://extension/' + path, onMessage: event(), onInstalled: event(), onStartup: event(), async getContexts(filter) {
+      return contexts.filter(context => ['contextType', 'documentId', 'documentUrl', 'tabId'].every(key => {
+        const values = filter[key === 'contextType' ? 'contextTypes' : key + 's'];
+        return !values || values.includes(context[key]);
+      }));
+    } },
     omnibox: { onInputChanged: event(), onInputEntered: event() },
     storage: { local, session: session ?? storage() },
     tabs: { async create(options) { tabs.push({ action: 'create', ...options }); return { id: 10 }; }, async update(id, options) { tabs.push({ action: 'update', id, ...options }); return { id }; }, async remove(id) { tabs.push({ action: 'remove', id }); }, async query() { return [{ id: 7 }]; } },
@@ -28,10 +34,10 @@ function fixture({ cache, session, node = {}, handleEvent } = {}) {
   };
   const store = createStateStore(local);
   const background = createBackground({ chrome, lifecycle, store, now: () => 1_000_000 });
-  const sender = { id: 'extension', url: 'chrome-extension://extension/status.html?resolve=foo', tab: { id: 42 } };
+  const sender = { id: 'extension', url: 'chrome-extension://extension/status.html?resolve=foo', documentId: 'status-document', frameId: 0, tab: { id: 42 } };
   const page = (method, args = []) => background.handleMessage({ channel: 'golink', target: 'worker', method, args }, sender);
   const offscreen = message => background.handleMessage({ channel: 'golink', target: 'worker', docId: 'doc', epoch: 1, ...message }, { id: 'extension', url: 'chrome-extension://extension/offscreen.html' });
-  return { background, chrome, lifecycle, local, store, calls, tabs, rules, page, offscreen, sender };
+  return { background, chrome, lifecycle, local, store, calls, tabs, rules, contexts, page, offscreen, sender };
 }
 
 test('typing filters stale local links without starting or refreshing the node', async () => {
@@ -110,6 +116,90 @@ test('not found and golink UI resolve results open safe local modes', async () =
   const ui = fixture({ node: { resolve: () => ({ golinkUI: '/.detail/foo?x=<script>' }) } });
   await ui.page('resolve', ['foo+']);
   assert.equal(ui.tabs[0].url, 'chrome-extension://extension/status.html?golinkUI=%2F.detail%2Ffoo%3Fx%3D%3Cscript%3E');
+});
+
+const navigationResults = [
+  ['redirect', { redirect: 'https://target.example/foo' }, 'https://target.example/foo'],
+  ['create', { notFound: true }, 'chrome-extension://extension/status.html?create=foo'],
+  ['golinkUI', { golinkUI: '/.detail/foo' }, 'chrome-extension://extension/status.html?golinkUI=%2F.detail%2Ffoo'],
+];
+
+for (const [mode, result, destination] of navigationResults) {
+  test(`delayed ${mode} result leaves a navigated-away document alone`, async () => {
+    const lookup = deferred(), started = deferred();
+    const f = fixture({ node: { resolve() { started.resolve(); return lookup.promise; } } });
+    const pending = f.page('resolve', ['foo']);
+    await started.promise;
+    // Chrome no longer exposes the original extension document after navigation.
+    f.contexts.splice(0);
+    lookup.resolve(result);
+    await pending;
+    assert.deepEqual(f.tabs, []);
+  });
+
+  for (const sameDocument of [true, false]) {
+    test(`delayed ${mode} result cannot replace a newer request in ${sameDocument ? 'the same' : 'a new'} document`, async () => {
+      const lookup = deferred(), started = deferred(), newStatus = deferred();
+      let statuses = 0;
+      const f = fixture({ node: {
+        status() { return ++statuses === 1 ? { state: 'Running' } : newStatus.promise; },
+        resolve(path) { if (path === 'foo') { started.resolve(); return lookup.promise; } return { redirect: 'https://new.example/bar' }; },
+      } });
+      const pending = f.page('resolve', ['foo']);
+      await started.promise;
+      const sender = { ...f.sender, documentId: sameDocument ? f.sender.documentId : 'new-status-document' };
+      if (!sameDocument) f.contexts.splice(0, 1, { ...f.contexts[0], documentId: sender.documentId });
+      const newer = f.background.handleMessage({ channel: 'golink', target: 'worker', method: 'resolve', args: ['bar'] }, sender);
+      lookup.resolve(result);
+      await pending;
+      assert.deepEqual(f.tabs, []);
+      newStatus.resolve({ state: 'Running' });
+      assert.equal((await newer).ok, true);
+      assert.deepEqual(f.tabs, [{ action: 'update', id: 42, url: 'https://new.example/bar' }]);
+    });
+  }
+
+  test(`delayed ${mode} result navigates its live originating document`, async () => {
+    const lookup = deferred(), started = deferred();
+    const f = fixture({ node: { resolve() { started.resolve(); return lookup.promise; } } });
+    const pending = f.page('resolve', ['foo']);
+    await started.promise;
+    lookup.resolve(result);
+    assert.equal((await pending).ok, true);
+    assert.deepEqual(f.tabs, [{ action: 'update', id: 42, url: destination }]);
+  });
+}
+
+test('resolve fails closed when the originating document cannot be verified', async () => {
+  for (const reason of ['missing document ID', 'missing API', 'API failure', 'wrong tab', 'wrong document', 'subframe']) {
+    const f = fixture({ node: { resolve: () => ({ redirect: 'https://target.example/' }) } });
+    if (reason === 'missing document ID') delete f.sender.documentId;
+    if (reason === 'missing API') delete f.chrome.runtime.getContexts;
+    if (reason === 'API failure') f.chrome.runtime.getContexts = async () => { throw new Error('Context lookup failed'); };
+    if (reason === 'wrong tab') f.contexts[0].tabId = 99;
+    if (reason === 'wrong document') f.contexts[0].documentId = 'other-document';
+    if (reason === 'subframe') f.contexts[0].frameId = 1;
+    await f.page('resolve', ['foo']);
+    assert.deepEqual(f.tabs, [], reason);
+  }
+});
+
+test('a newer resolve arriving during the document check keeps navigation ownership', async () => {
+  const release = deferred();
+  const f = fixture({ node: { resolve: path => ({ redirect: 'https://target.example/' + path }) } });
+  const getContexts = f.chrome.runtime.getContexts;
+  let checks = 0;
+  f.chrome.runtime.getContexts = async filter => {
+    const contexts = await getContexts(filter);
+    if (++checks === 1) await release.promise;
+    return contexts;
+  };
+  const older = f.page('resolve', ['foo']);
+  await tick();
+  assert.equal((await f.page('resolve', ['bar'])).ok, true);
+  release.resolve();
+  await older;
+  assert.deepEqual(f.tabs, [{ action: 'update', id: 42, url: 'https://target.example/bar' }]);
 });
 
 test('unreachable resolves return an error envelope and leave the status tab in place', async () => {
@@ -297,7 +387,8 @@ test('real worker registration routes durable writes through lifecycle without d
     if (values.tsState?.values.identity === 'aWQ=') { writing.resolve(); await release.promise; }
     await set(values);
   };
-  chrome.runtime.getContexts = async () => contexts;
+  const getTabContexts = chrome.runtime.getContexts;
+  chrome.runtime.getContexts = async filter => filter.contextTypes.includes('TAB') ? getTabContexts(filter) : contexts;
   chrome.runtime.sendMessage = message => new Promise((resolve, reject) => {
     const sender = { id: 'extension', url: chrome.runtime.getURL(message.target === 'worker' ? 'offscreen.html' : 'background.js') };
     let handled = false;
@@ -345,6 +436,8 @@ test('real worker registration routes durable writes through lifecycle without d
   assert.deepEqual(f.local.data.tsState.values, { identity: 'aWQ=' });
   assert.equal(chrome.storage.session.data.golinkOffscreenUsed, true);
   assert.deepEqual(f.tabs[0], { action: 'remove', id: 77 });
+  assert.equal((await request('resolve', ['foo'])).ok, true);
+  assert.deepEqual(f.tabs[1], { action: 'update', id: 42, url: 'https://target.example' });
   assert.deepEqual(await request('reset'), { ok: true, value: { ok: true } });
   assert.equal(f.local.data.tsState.epoch, 2);
   assert.deepEqual(f.local.data.tsState.values, {});

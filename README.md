@@ -81,6 +81,7 @@ On 2026-10-21, Chrome 156.0.8078.47 on headless Linux loaded the unpacked extens
 | Keyboard | Tab reached auth key, submit button, and Connection settings in order with visible focus outlines; Enter opened settings |
 | Settings validation | Submitting `bad/host` through the real form showed the worker's hostname validation error and enabled recovery controls |
 | Reset | Clicking Reset returned the real node to `NeedsLogin` with login/auth controls enabled and no error |
+| Direct cold-node capture | Chrome 156 redirected `http://go/foo/a%2Fb?x=1&x=2&literal=%252F&hash=%23` to `status.html#` followed by that exact original URL; the parsed raw suffix stayed `foo/a%2Fb?x=1&x=2&literal=%252F&hash=%23`, offscreen contexts increased from 0 to 1, and the real node reached `NeedsLogin` with zero page errors. Checked with `/tmp/golink-task9-navigation.cjs`; this covers unauthenticated interception and startup |
 | Page/popup console | Runtime/Log observation reported no error events |
 
 The temporary Node 18 CDP helper emitted an experimental Undici WebSocket warning. That warning came from the helper, not the extension. These checks used no tailnet credentials and do not establish successful login, remote operations, or identity retention after browser restart.

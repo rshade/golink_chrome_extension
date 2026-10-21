@@ -24,6 +24,7 @@ export function createBackground({ chrome, lifecycle, store, now = Date.now }) {
   let registered = false, repairRequest, refreshRequest, lastState;
   let generation = 0, replacing = 0;
   let cacheWrites = Promise.resolve(), tabOperations = Promise.resolve(), replacements = Promise.resolve();
+  const pendingNavigations = new Map();
   const local = chrome.storage.local, session = chrome.storage.session;
   const statusURL = chrome.runtime.getURL('status.html');
   const offscreenURL = chrome.runtime.getURL('offscreen.html');
@@ -194,17 +195,33 @@ export function createBackground({ chrome, lifecycle, store, now = Date.now }) {
           } catch (error) { return success({ ...result, cacheRefreshError: errorInfo(error) }); }
         }
         case 'resolve': {
-          if (!Number.isInteger(sender.tab?.id)) throw fault('A status tab is required to resolve a link');
-          const status = await lifecycle.call('status');
-          observeState(status.state);
-          if (status.state !== 'Running') return success({ pending: true });
-          const result = await lifecycle.call('resolve', args);
-          let url;
-          if (result.redirect) url = supportedURL(result.redirect);
-          else if (result.notFound) url = pageURL('create', args[0].split(/[/?]/, 1)[0]);
-          else if (result.golinkUI) url = pageURL('golinkUI', result.golinkUI);
-          if (url) await chrome.tabs.update(sender.tab.id, { url });
-          return success(result);
+          if (!Number.isInteger(sender.tab?.id) || sender.frameId !== 0 || typeof sender.documentId !== 'string' || !sender.documentId) {
+            throw fault('A status tab document is required to resolve a link');
+          }
+          const tabId = sender.tab.id, documentId = sender.documentId, request = Symbol();
+          // Claim the tab before any await so a newer request supersedes this one.
+          pendingNavigations.set(tabId, request);
+          try {
+            const status = await lifecycle.call('status');
+            observeState(status.state);
+            if (status.state !== 'Running') return success({ pending: true });
+            const result = await lifecycle.call('resolve', args);
+            let url;
+            if (result.redirect) url = supportedURL(result.redirect);
+            else if (result.notFound) url = pageURL('create', args[0].split(/[/?]/, 1)[0]);
+            else if (result.golinkUI) url = pageURL('golinkUI', result.golinkUI);
+            if (url && pendingNavigations.get(tabId) === request) {
+              const contexts = await chrome.runtime.getContexts({ contextTypes: ['TAB'], tabIds: [tabId], documentIds: [documentId] });
+              // Recheck ownership after Chrome replies; never navigate a replacement document.
+              if (pendingNavigations.get(tabId) === request && contexts.some(context =>
+                context.contextType === 'TAB' && context.tabId === tabId && context.documentId === documentId && context.frameId === 0)) {
+                await chrome.tabs.update(tabId, { url });
+              }
+            }
+            return success(result);
+          } finally {
+            if (pendingNavigations.get(tabId) === request) pendingNavigations.delete(tabId);
+          }
         }
       }
     } catch (error) { return failure(error); }
