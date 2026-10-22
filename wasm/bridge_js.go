@@ -224,11 +224,14 @@ func (a *application) call(method string, args []js.Value) (any, error) {
 			return map[string]any{"redirect": result.Redirect}, nil
 		}
 	case "save":
-		values, err := stringArgs(args, 2, "save(short, long)")
+		if len(args) != 3 || args[2].Type() != js.TypeBoolean {
+			return nil, errors.New("usage: save(short, long, overwrite)")
+		}
+		values, err := stringArgs(args[:2], 2, "save(short, long, overwrite)")
 		if err != nil {
 			return nil, err
 		}
-		if err := n.client.Save(ctx, values[0], values[1]); err != nil {
+		if err := n.client.Save(ctx, values[0], values[1], args[2].Bool()); err != nil {
 			return nil, err
 		}
 		return map[string]any{"ok": true}, nil

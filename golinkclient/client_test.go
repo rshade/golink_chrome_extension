@@ -40,7 +40,7 @@ func TestSaveResolveAndExport(t *testing.T) {
 	c := realClient(t)
 	ctx := context.Background()
 	const target = "https://example.com/a%2Fb?q=x%2By#section"
-	if err := c.Save(ctx, "docs", target); err != nil {
+	if err := c.Save(ctx, "docs", target, false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := c.Resolve(ctx, "docs")
@@ -55,7 +55,7 @@ func TestSaveResolveAndExport(t *testing.T) {
 	if err != nil || !missing.NotFound {
 		t.Fatalf("missing = %+v, %v", missing, err)
 	}
-	if err := c.Save(ctx, "home", "https://example.net/"); err != nil {
+	if err := c.Save(ctx, "home", "https://example.net/", false); err != nil {
 		t.Fatal(err)
 	}
 	links, err := c.Links(ctx)
@@ -75,12 +75,144 @@ func TestSaveResolveAndExport(t *testing.T) {
 // headers, unbounded error reads, truncated exports, and incorrect error kinds.
 func TestTemplatePathAndQuery(t *testing.T) {
 	c := realClient(t)
-	if err := c.Save(context.Background(), "tmpl", "https://example.com/{{.Path}}"); err != nil {
+	if err := c.Save(context.Background(), "tmpl", "https://example.com/{{.Path}}", false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := c.Resolve(context.Background(), "tmpl/a%2Fb?x=1&x=2")
 	if err != nil || got.Redirect != "https://example.com/a/b?x=1&x=2" {
 		t.Fatalf("Resolve = %+v, %v", got, err)
+	}
+}
+
+func TestResolveGolinkPages(t *testing.T) {
+	c := realClient(t)
+	for path, want := range map[string]string{"": "/", ".all": "/.all", ".help": "/.help"} {
+		got, err := c.Resolve(context.Background(), path)
+		if err != nil || got.GolinkUI != want {
+			t.Errorf("Resolve(%q) = %+v, %v; want GolinkUI %q", path, got, err, want)
+		}
+	}
+}
+
+func TestResolveFollowsAliases(t *testing.T) {
+	c := realClient(t)
+	ctx := context.Background()
+	for short, long := range map[string]string{"chat": "/meet", "meet": "https://meet.example/{{.Path}}", "a": "/b", "b": "/a"} {
+		if err := c.Save(ctx, short, long, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := c.Resolve(ctx, "chat/room?x=1")
+	if err != nil || got.Redirect != "https://meet.example/room?x=1" {
+		t.Fatalf("Resolve = %+v, %v", got, err)
+	}
+	_, err = c.Resolve(ctx, "a")
+	assertKind(t, err, "loop")
+}
+
+func TestSaveRefusesExistingLinks(t *testing.T) {
+	c := realClient(t)
+	ctx := context.Background()
+	if err := c.Save(ctx, "docs", "https://example.com/old", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, short := range []string{"docs", "DOCS", "do-cs"} {
+		got := assertKind(t, c.Save(ctx, short, "https://example.com/new", false), "exists")
+		if !strings.Contains(got.Message, "https://example.com/old") {
+			t.Fatalf("Message = %q", got.Message)
+		}
+	}
+	if link, err := c.Lookup(ctx, "docs"); err != nil || link == nil || link.Long != "https://example.com/old" {
+		t.Fatalf("Lookup = %+v, %v", link, err)
+	}
+	if err := c.Save(ctx, "docs", "https://example.com/new", true); err != nil {
+		t.Fatal(err)
+	}
+	if link, err := c.Lookup(ctx, "docs"); err != nil || link == nil || link.Long != "https://example.com/new" {
+		t.Fatalf("Lookup after overwrite = %+v, %v", link, err)
+	}
+	if link, err := c.Lookup(ctx, "missing"); err != nil || link != nil {
+		t.Fatalf("Lookup(missing) = %+v, %v", link, err)
+	}
+}
+
+func TestPing(t *testing.T) {
+	if !realClient(t).Ping(context.Background()) {
+		t.Fatal("Ping = false for a live golink")
+	}
+	c := stubClient(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) })
+	if c.Ping(context.Background()) {
+		t.Fatal("Ping = true for a failing server")
+	}
+}
+
+func TestQueryIsEscapedForTheRequestLine(t *testing.T) {
+	c := stubClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.RequestURI != "/search?q=hello%20world%22%C3%A9&x=a%2Bb" {
+			t.Errorf("RequestURI = %q", r.RequestURI)
+		}
+		w.WriteHeader(404)
+	})
+	if got, err := c.Resolve(context.Background(), "search?q=hello world\"é&x=a%2Bb"); err != nil || !got.NotFound {
+		t.Fatalf("Resolve = %+v, %v", got, err)
+	}
+}
+
+// golink's default -https mode serves only RedirectHandler on port 80.
+func TestHTTPSUpgrade(t *testing.T) {
+	db, err := golink.NewSQLiteDB(filepath.Join(t.TempDir(), "golink.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := golink.New(golink.Options{DB: db, Dev: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secure := httptest.NewTLSServer(golink.HSTS(server.Handler()))
+	t.Cleanup(secure.Close)
+	secureURL, _ := url.Parse(secure.URL)
+	plain := httptest.NewServer(golink.RedirectHandler(secureURL.Host))
+	t.Cleanup(plain.Close)
+	plainURL, _ := url.Parse(plain.URL)
+	c := &Client{HTTP: secure.Client(), Host: plainURL.Host}
+	ctx := context.Background()
+	if !c.Ping(ctx) {
+		t.Fatal("Ping did not follow the HTTPS upgrade")
+	}
+	if err := c.Save(ctx, "docs", "https://example.com/docs", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.Resolve(ctx, "docs"); err != nil || got.Redirect != "https://example.com/docs" {
+		t.Fatalf("Resolve = %+v, %v", got, err)
+	}
+	if links, err := c.Links(ctx); err != nil || len(links) != 1 {
+		t.Fatalf("Links = %+v, %v", links, err)
+	}
+}
+
+func TestLinkRedirectsAreNotHTTPSUpgrades(t *testing.T) {
+	for _, tt := range []struct {
+		name, location string
+		referrerPolicy bool
+	}{
+		{"golink link redirect", "https://HOST/foo", true},
+		{"other host", "https://example.com/foo", false},
+		{"other path", "https://HOST/bar", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var c *Client
+			c = stubClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if tt.referrerPolicy {
+					w.Header().Set("Referrer-Policy", "no-referrer")
+				}
+				w.Header().Set("Location", strings.Replace(tt.location, "HOST", c.Host, 1))
+				w.WriteHeader(302)
+			})
+			want := strings.Replace(tt.location, "HOST", c.Host, 1)
+			if got, err := c.Resolve(context.Background(), "foo"); err != nil || got.Redirect != want {
+				t.Fatalf("Resolve = %+v, %v; want redirect %q", got, err, want)
+			}
+		})
 	}
 }
 
@@ -154,7 +286,6 @@ func TestResolveRejectsInvalidResponses(t *testing.T) {
 		{"relative location", "detail/foo", 302},
 		{"protocol relative location", "//other.example/foo", 302},
 		{"missing absolute host", "https://", 302},
-		{"unexpected success", "", 200},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := stubClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +327,7 @@ func TestSaveFormAndHeaders(t *testing.T) {
 		}
 		w.WriteHeader(204)
 	})
-	if err := c.Save(context.Background(), "some link+", "https://example.com/a%2Fb?q=a+b&x=2#f"); err != nil {
+	if err := c.Save(context.Background(), "some link+", "https://example.com/a%2Fb?q=a+b&x=2#f", true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -206,7 +337,7 @@ func TestSaveRejectsRedirect(t *testing.T) {
 		w.Header().Set("Location", "/saved")
 		w.WriteHeader(302)
 	})
-	assertKind(t, c.Save(context.Background(), "foo", "https://example.com"), "http")
+	assertKind(t, c.Save(context.Background(), "foo", "https://example.com", true), "http")
 }
 
 var operations = []struct {
@@ -214,7 +345,8 @@ var operations = []struct {
 	call func(context.Context, *Client) error
 }{
 	{"Resolve", func(ctx context.Context, c *Client) error { _, err := c.Resolve(ctx, "foo"); return err }},
-	{"Save", func(ctx context.Context, c *Client) error { return c.Save(ctx, "foo", "https://example.com") }},
+	{"Save", func(ctx context.Context, c *Client) error { return c.Save(ctx, "foo", "https://example.com", true) }},
+	{"Lookup", func(ctx context.Context, c *Client) error { _, err := c.Lookup(ctx, "foo"); return err }},
 	{"Links", func(ctx context.Context, c *Client) error { _, err := c.Links(ctx); return err }},
 }
 

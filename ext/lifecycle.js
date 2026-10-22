@@ -6,17 +6,33 @@ const success = value => ({ ok: true, value });
 const failure = error => ({ ok: false, error: { kind: error.kind ?? 'lifecycle', message: error.message ?? String(error) } });
 const fault = (message, kind = 'lifecycle') => Object.assign(new Error(message), { kind });
 
+// A distinct kind keeps a stuck node from being reported as a golink timeout.
+const nodeTimeout = message => fault(`${message}. Try again or reset the device.`, 'node-timeout');
+
 function bounded(promise, timeoutMs) {
   let timer;
   return Promise.race([
     promise,
-    new Promise((_, reject) => { timer = setTimeout(() => reject(fault('Offscreen request timed out', 'timeout')), timeoutMs); }),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(nodeTimeout('The extension network node timed out')), timeoutMs); }),
   ]).finally(() => clearTimeout(timer));
 }
 
+// Racing against a long-lived pending promise would keep every settled
+// result reachable from it. Waiters remove themselves once they settle.
+function untilExit(document, promise) {
+  if (!document) return promise;
+  if (document.error) return Promise.reject(document.error);
+  return new Promise((resolve, reject) => {
+    document.waiters.add(reject);
+    promise.then(resolve, reject).finally(() => document.waiters.delete(reject));
+  });
+}
+
+const authKeyLoggedIn = new Set(['Starting', 'Running', 'NeedsMachineAuth']);
+
 // The real worker passes chrome.storage.session. The memory fallback is for
 // isolated consumers that do not need recovery across worker reconstruction.
-export function createLifecycle({ runtime, offscreen, store, now = Date.now, session, timeoutMs = 30_000 }) {
+export function createLifecycle({ runtime, offscreen, store, now = Date.now, session, timeoutMs = 30_000, authKeyTimeoutMs = 20_000, pollMs = 250 }) {
   if (!session) {
     const values = {};
     session = { async get() { return { ...values }; }, async set(update) { Object.assign(values, update); } };
@@ -42,18 +58,19 @@ export function createLifecycle({ runtime, offscreen, store, now = Date.now, ses
   function adopt(docId, epoch) {
     if (current?.docId === docId && current.epoch === epoch) return;
     invalidate();
-    let reject;
-    const exited = new Promise((_, fail) => { reject = fail; });
-    exited.catch(() => {});
-    current = { docId, epoch, exited, reject };
+    const document = { docId, epoch, waiters: new Set(), error: undefined };
+    document.reject = error => {
+      if (document.error) return;
+      document.error = error;
+      for (const reject of document.waiters) reject(error);
+      document.waiters.clear();
+    };
+    current = document;
   }
   async function rpc(method, args = [], document = current, budgetMs = timeoutMs) {
     const message = { channel: 'golink', target: 'offscreen', method, args, requestId: String(++requestId) };
     if (document) Object.assign(message, { docId: document.docId, epoch: document.epoch });
-    const reply = await bounded(Promise.race([
-      Promise.resolve().then(() => runtime.sendMessage(message)),
-      ...(document?.exited ? [document.exited] : []),
-    ]), budgetMs);
+    const reply = await bounded(untilExit(document, Promise.resolve().then(() => runtime.sendMessage(message))), budgetMs);
     if (!reply?.ok) throw fault(reply?.error?.message ?? 'Offscreen request failed', reply?.error?.kind ?? 'lifecycle');
     return reply.value;
   }
@@ -71,7 +88,10 @@ export function createLifecycle({ runtime, offscreen, store, now = Date.now, ses
       throw fault('Node crashed twice within 60 seconds. Reset the device or retry later.', 'fatal');
     }
   }
+  // Startup can take seconds while WASM compiles, so polls back off to 100 ms.
+  const backoff = delay => Math.min(delay * 2, 100);
   async function waitHello(deadline = Date.now() + timeoutMs) {
+    let delay = 5;
     while (true) {
       if (disposed) throw fault('Lifecycle is disposed');
       let hello;
@@ -79,7 +99,8 @@ export function createLifecycle({ runtime, offscreen, store, now = Date.now, ses
         if (Date.now() >= deadline) throw error;
       }
       if (hello) return hello;
-      await new Promise(resolve => setTimeout(resolve, 5));
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay = backoff(delay);
     }
   }
   async function ensure({ preparedEpoch, authKey } = {}) {
@@ -108,10 +129,12 @@ export function createLifecycle({ runtime, offscreen, store, now = Date.now, ses
       }
       adopt(hello.docId, config.tsState.epoch);
       const document = current;
+      let delay = 5;
       while (!hello.ready) {
         if (hello.fatal) throw fault(hello.fatal, 'fatal');
-        if (Date.now() >= deadline) throw fault('Offscreen startup timed out', 'timeout');
-        await bounded(Promise.race([new Promise(resolve => setTimeout(resolve, 5)), document.exited]), timeoutMs);
+        if (Date.now() >= deadline) throw nodeTimeout('The extension network node timed out while starting');
+        await bounded(untilExit(document, new Promise(resolve => setTimeout(resolve, delay))), timeoutMs);
+        delay = backoff(delay);
         hello = await waitHello(deadline);
         if (hello.docId !== document.docId) throw fault('Offscreen document changed during startup');
       }
@@ -177,6 +200,24 @@ export function createLifecycle({ runtime, offscreen, store, now = Date.now, ses
       return success({ accepted: true });
     } catch (error) { return failure(error); }
   }
+  // Control reports a rejected key only as a backend error message, and the
+  // node stays in NeedsLogin. A failed key must not linger in the node, where a
+  // later Log in would reuse it, so the node is replaced with a cleared one.
+  async function awaitAuthKeyLogin() {
+    const deadline = Date.now() + authKeyTimeoutMs;
+    let status;
+    while (true) {
+      status = await rpc('status');
+      if (authKeyLoggedIn.has(status.state)) return;
+      if (status.backendError || Date.now() >= deadline) break;
+      await new Promise(resolve => setTimeout(resolve, pollMs));
+    }
+    await close();
+    const state = await store.advance({ clear: true });
+    await ensure({ preparedEpoch: state.epoch });
+    throw fault(status.backendError ? 'Auth-key login failed' : 'Auth-key login timed out', 'authKey');
+  }
+
   return {
     ensureOffscreen() {
       if (!ensureRequest) {
@@ -217,7 +258,10 @@ export function createLifecycle({ runtime, offscreen, store, now = Date.now, ses
           await close();
           if (reset) await session.set({ golinkFatalTimestamps: [] });
           const state = await store.advance({ clear: clear || reset });
+          const usingAuthKey = authKey !== undefined;
           await ensure({ preparedEpoch: state.epoch, authKey });
+          authKey = undefined;
+          if (usingAuthKey) await awaitAuthKeyLogin();
           return { ok: true };
         } finally { authKey = undefined; }
       });

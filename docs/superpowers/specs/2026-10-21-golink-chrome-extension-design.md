@@ -87,9 +87,11 @@ wasm/                //go:build js
                      into golinkclient
 ext/                 load unpacked
   manifest.json      MV3; omnibox keyword "go"; permissions: offscreen, storage,
-                     tabs, webNavigation; host permission http://go/*;
-                     CSP extension_pages: script-src 'self' 'wasm-unsafe-eval'
-  background.js      service worker: omnibox, navigation interception,
+                     tabs, declarativeNetRequestWithHostAccess;
+                     host permission http://go/*; status.html is a web-accessible
+                     resource for the redirect rule; CSP extension_pages:
+                     script-src 'self' 'wasm-unsafe-eval'
+  background.js      service worker: omnibox, redirect-rule installation,
                      offscreen lifecycle, storage, message routing
   lib.js             pure helpers (ES module) used by background.js; unit tested
   offscreen.html/js  hosts wasm_exec.js + main.wasm
@@ -135,43 +137,65 @@ The HTTP client sets `CheckRedirect` to return `http.ErrUseLastResponse`.
 
 | Component | Lifetime | Owns |
 |---|---|---|
-| Service worker | Killed after about 30 s idle; woken by events and messages | `chrome.storage.local`, omnibox, navigation, routing |
+| Service worker | Killed after about 30 s idle; woken by events and messages | `chrome.storage.local`, omnibox, routing |
 | Offscreen document | Created on first use, lives until the browser exits; one per extension | WASM node and its in-memory state |
-| status page / popup | While open | Display only |
+| status page / popup | While open | Display and pending resolve requests |
 
 Offscreen documents can only use `chrome.runtime`, not `chrome.storage`.
 
 ### State persistence
 
-1. Every request from the service worker first calls `ensureOffscreen()`.
+1. Every node request from the service worker first calls `ensureOffscreen()`.
    This checks `chrome.runtime.getContexts({contextTypes: ['OFFSCREEN_DOCUMENT']})`
    and, if none exists, calls `chrome.offscreen.createDocument` with reason
-   `WORKERS`. Concurrent calls share one in-flight promise.
-2. On creation, the service worker reads `chrome.storage.local.tsState` and the
-   persisted `hostname`, and sends them to the offscreen document, which calls
-   `golinkExt.start`.
+   `WORKERS`. Concurrent calls share one in-flight promise. The offscreen
+   document registers its message listener before loading WASM and sends a
+   `ready` message when `golinkExt` is available; `ensureOffscreen()` waits for
+   that handshake before sending `start` or other calls.
+2. On creation, the service worker reads `chrome.storage.local.tsState` and
+   the persisted `hostname`. `tsState` is `{epoch, values}`, where `values` is
+   the state map passed to the offscreen document for `golinkExt.start`.
 3. The Go state store serves reads from a synchronous in-memory map. Writes
    update the map and call `onStateWrite`. The offscreen document sends
-   `{type: "stateWrite", key, value}`, and the service worker merges it into
-   `tsState`.
+   `{type: "stateWrite", epoch, key, value}` and tracks the reply. The service
+   worker serializes state writes and the storage changes for logout and reset
+   in one queue. For a matching epoch, it reads `tsState`, merges the key into
+   `values`, awaits `chrome.storage.local.set({tsState})`, then acknowledges
+   the message. It discards and acknowledges writes from an older epoch. The offscreen
+   document waits for pending write acknowledgements before reporting
+   `Running` or completing an operation that changes the node identity. A
+   failed storage write is reported as a fatal persistence error, not as a
+   successful login.
 4. `hostname` is generated once as `golink-ext-<6 hex>` and persisted.
 
-Storage keys: `tsState`, `hostname`, `linksCache` (`{fetchedAt, links}`).
+Storage keys: `tsState` (`{epoch, values}`), `hostname`, `linksCache`
+(`{fetchedAt, links}`). The epoch is initialized once and increments on logout,
+device reset, or offscreen replacement. The new epoch is persisted in the same
+`tsState` write as the new values, before a replacement starts. Messages from
+an older document cannot restore its state.
 
 ### Resolving a link
 
 Entry points:
 
-- `chrome.omnibox.onInputEntered`: input `foo/bar?x=1`.
-- `chrome.webNavigation.onBeforeNavigate` filtered to host `go`, main frame
-  only: path and query from the URL.
+- `chrome.omnibox.onInputEntered`: input `foo/bar?x=1`. The handler immediately
+  opens `status.html` with the pending path in the requested tab disposition.
+- A persistent `declarativeNetRequest` main-frame redirect rule for
+  `http://go/*`. The service worker installs it on extension installation and
+  keeps it across browser restarts. It also checks the rule when the worker
+  starts, so an update can repair a missing or stale rule. A regex substitution
+  uses `chrome.runtime.getURL('status.html')` and puts the captured original
+  URL in the fragment, so its path and query remain intact. `status.html` is
+  declared in `web_accessible_resources`. The page parses the original URL
+  and sends the path and query to the service worker. Navigation is intercepted
+  before Chrome attempts to load `go`.
 
 Flow:
 
-1. `ensureOffscreen()`, then read the node state.
-2. Not `Running`: `tabs.update(tabId, status.html?pending=<path>)`. The page
-   shows "Connecting…" or the login UI and retries automatically once
-   `Running`.
+1. The status page shows "Connecting…" immediately and requests a resolve.
+   The service worker calls `ensureOffscreen()`, then reads the node state.
+2. Not `Running`: the page shows the login UI or waits for the node, then
+   retries automatically once `Running`.
 3. `Running`: call `resolve(path)`.
    - `redirect`: `tabs.update(tabId, {url})`.
    - `notFound`: `status.html?create=<short>` (save form pre-filled).
@@ -190,8 +214,9 @@ to the tailnet.
 ### Cold start
 
 The first request after the browser starts compiles the WASM and connects to
-the tailnet, which takes a few seconds. The tab shows `status.html?pending=…`
-during this time.
+the tailnet, which takes a few seconds. The tab already shows `status.html`
+during this time. The redirect rule survives service-worker restarts, so it
+also works before the worker wakes up.
 
 ## Login, errors, recovery
 
@@ -203,11 +228,17 @@ it closes that tab and resumes any pending resolve.
 
 ### Auth key (optional)
 
-A popup field passes the key to `start({authKey})` for the next login only.
-The key is **not persisted**. After registration the node's identity lives in
-`tsState`. The README recommends a tagged key and explains that golink then
-records the tag identity, not a person, as link owner. Ephemeral keys cause
-the device to be deleted after it's been offline for a while.
+A popup field sends the key to the service worker while the node is in
+`NeedsLogin`. Because `start()` has already run by then, the worker closes the
+offscreen document, clears stale state values while incrementing the epoch,
+and starts a replacement with `start({authKey})`. It serializes this restart
+with other node operations and waits for the state write acknowledgements
+before reporting success. The key is kept only in memory for that restart
+and is **not persisted**. After registration the node's identity lives in
+`tsState`. The README recommends a tagged key and
+explains that golink then records the tag identity, not a person, as link
+owner. Ephemeral keys cause the device to be deleted after it's been offline
+for a while.
 
 ### States shown in the popup
 
@@ -231,10 +262,16 @@ the device to be deleted after it's been offline for a while.
   device to reach `go:80`.
 - **HTTP errors:** golink's response body is shown.
 
-**Reset device** is a service worker operation, not a Go API call. It calls
-`logout()` (ignoring errors), closes the offscreen document, removes
-`tsState` and `linksCache` (keeping `hostname`), then recreates the offscreen
-document, which starts in `NeedsLogin`.
+**Reset device** is a service worker operation, not a Go API call. It blocks
+new node operations, calls `logout()` (ignoring errors), and closes the
+offscreen document. In the state-operation queue it increments the epoch and
+stores `tsState: {epoch, values: {}}`, then removes `linksCache` (keeping
+`hostname`). It recreates the offscreen document with the new epoch, which
+starts in `NeedsLogin`. Late writes from the old document are discarded.
+
+**Log out** uses the same queued epoch increment and state clearing after the
+backend's `Logout` completes. It closes the offscreen document before clearing
+local state, so a late write cannot log the user back in.
 
 ### Known limitations (documented in README)
 
@@ -248,17 +285,17 @@ document, which starts in `NeedsLogin`.
 - **Logout:** **Log out** calls the backend's `Logout`, which expires the
   device key and disconnects. Ephemeral devices are then removed from the
   tailnet. Non-ephemeral devices remain in the admin console as logged out
-  until an admin deletes them. Local `tsState` and `linksCache` are cleared
+  until an admin deletes them. Local state values and `linksCache` are cleared
   either way.
 - Tailnet-only link targets don't load without native Tailscale (see
   Non-goals).
 - Traffic goes through DERP relays over WebSocket only, with no direct UDP
   paths. Fine for lookups, slower than native Tailscale.
 - To verify during implementation: whether Chrome sends a typed `go/foo` with
-  no scheme to `http://go/foo` (caught by `onBeforeNavigate`) or treats it as
-  a search. If it's a search, add a `webNavigation` filter for the default
-  search engine's URL whose query starts with `go/`, and record what happened
-  in the README. The omnibox keyword works either way.
+  no scheme to `http://go/foo` (caught by the redirect rule) or treats it as
+  a search. If it becomes a search, document that users should enter
+  `http://go/foo` or use the `go` omnibox keyword. The extension does not
+  intercept searches sent to the user's search engine.
 - To verify during implementation: that dialing the bare name `go` resolves
   through the in-process MagicDNS resolver. Fallback: configure the full
   `go.<tailnet>.ts.net` in `golinkHost`.
@@ -285,11 +322,12 @@ Cases:
 
 ### JS (`node --test`, no npm dependencies)
 
-`ext/lib.js` functions:
+`ext/lib.js` functions and the state-operation queue with fake Chrome storage:
 
 - parsing omnibox input or a URL into a path;
 - filtering and ranking suggestions;
-- merging `stateWrite`s into `tsState`;
+- serializing and acknowledging `stateWrite`s, including concurrent keys and
+  a late write after logout or reset;
 - the crash-loop limiter (2 within 60 s).
 
 ### WASM smoke test
@@ -311,4 +349,7 @@ and check that `golinkExt` has all seven functions. No network.
   autocomplete.
 - State survives a browser restart; logout behavior as documented.
 - Auth-key login; an ACL that blocks golink gives the "unreachable" message.
+- A direct `http://go/foo` navigation on a cold start shows the pending page
+  immediately, then resolves; a reset during an in-flight state write stays
+  logged out after restart.
 - Typed `go/foo` with no scheme (see Known limitations).

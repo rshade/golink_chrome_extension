@@ -13,30 +13,33 @@ go version
 node --version
 ./build.sh
 go test ./...
+GOOS=js GOARCH=wasm go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./wasm
 node --test
 node scripts/wasm-smoke.cjs
 ```
 
-The build writes `ext/main.wasm` and copies the matching Go runtime to `ext/wasm_exec.js`. Both are ignored by Git. Rebuild after Go changes or a Go toolchain update. The smoke test checks the seven Promise API functions without starting a network node. Go tests use a real golink server and SQLite locally; neither is part of the WASM dependency graph.
+The build uses the same Tailscale feature tags and linker flags as upstream `cmd/tsconnect`. It writes `ext/main.wasm` and copies the matching Go runtime to `ext/wasm_exec.js`. Both are ignored by Git. Rebuild after Go changes or a Go toolchain update. The smoke test checks the seven Promise API functions without starting a network node. Go tests use a real golink server and SQLite locally; neither is part of the WASM dependency graph.
 
-1. Run an existing golink server in your tailnet. Give this extension device permission to reach its HTTP service on TCP port 80.
+1. Run an existing golink server in your tailnet. Give this extension device permission to reach it on TCP port 80, and on port 443 if golink serves HTTPS, which is its default. With HTTPS, golink's port 80 only redirects to its MagicDNS HTTPS name; the extension follows that redirect and connects with TLS through the tailnet.
 2. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's `ext/` directory.
 3. Open the extension popup and click **Log in**. Complete the Tailscale login in the new tab. Approve the device in the admin console if your tailnet requires it. When the node reaches `Running`, the login tab closes and the popup shows its user, tailnet, hostname, and golink reachability.
 4. If golink's bare name `go` fails, open **Connection settings**, set **Golink host** to the full MagicDNS name such as `go.example.ts.net`, and save. Enter a hostname, optionally with a port, rather than a URL. The optional control URL defaults to `https://controlplane.tailscale.com`. Saving settings reconnects with the existing identity. Blank fields restore defaults; the form does not display the currently saved settings.
 
 Use the omnibox by typing `go`, pressing Tab or Space to activate the keyword, and entering a short name such as `handbook`. Paths and queries can follow the name. You can also open `http://go/handbook` directly. The direct capture rule remains `http://go/*` even when you configure a full MagicDNS backend hostname. Typing `go/handbook` without a scheme may become a search; this behavior is still pending browser verification. Use the explicit HTTP URL or the omnibox keyword.
 
-To save the current tab, open the popup on an ordinary web page, enter a short name, check the prefilled target URL, and save. An unknown link opens a save form with the missing name prefilled. A name ending in `+` shows the cached link and explains how to use golink's web UI. Autocomplete ranks prefixes before substrings using a local cache. Typing does not initiate tailnet traffic. The cache becomes stale after five minutes and refreshes during node activity and after a successful save. If a refresh fails after saving, the UI reports that warning separately from the successful save.
+Fragments carry over, so `http://go/wiki#setup` opens the destination at `#setup` unless the link's target has its own fragment. A link whose target is another go link, such as `/other` or `http://go/other`, is followed inside the extension, up to ten hops.
+
+To save the current tab, open the popup on an ordinary web page, enter a short name, check the prefilled target, and save. The target can be a URL, a path to another go link, or a golink template. If the name already exists, the popup shows its current target and saves only after you click **Replace existing link**. A replacement changes the link for everyone in the tailnet. An unknown link opens a save form with the missing name prefilled. A name ending in `+` shows the cached link and explains how to use golink's web UI. Autocomplete ranks prefixes before substrings using a local cache. Typing does not initiate tailnet traffic. The cache becomes stale after five minutes and refreshes during node activity and after a successful save. If a refresh fails after saving, the UI reports that warning separately from the successful save.
 
 ## Tailnet access and identity
 
 For demos, a tagged auth key gives the extension a predictable policy identity. In `NeedsLogin`, paste the key into the popup's auth-key field and submit it. Use tags and `tagOwners` appropriate to your tailnet. For example, merge a grant like this into your existing policy:
 
 ```json
-{"grants":[{"src":["tag:golink-ext"],"dst":["tag:golink"],"ip":["tcp:80"]}]}
+{"grants":[{"src":["tag:golink-ext"],"dst":["tag:golink"],"ip":["tcp:80","tcp:443"]}]}
 ```
 
-This assumes the extension device has `tag:golink-ext` and the server has `tag:golink`. Define appropriate owners for both tags in `tagOwners`, and authorize the key's tags. An interactive login needs the equivalent source grant for that user or group. Follow your server's golink authorization policy too. A tagged device creates links under its tag identity; interactive login creates links under the person's identity.
+This assumes the extension device has `tag:golink-ext` and the server has `tag:golink`. Define appropriate owners for both tags in `tagOwners`, and authorize the key's tags. An interactive login needs the equivalent source grant for that user or group. Follow your server's golink authorization policy too. golink records links saved from any tagged device under the shared owner `tagged-devices`, which it treats as unowned, so any tailnet user can edit or replace them. Links saved after an interactive login are owned by that person.
 
 An ordinary interactive login persists its device identity. A non-ephemeral auth key also creates an identity that can persist across browser restarts. An ephemeral key causes Tailscale to clean up the device after it has been offline for a while, so it is useful for disposable demos but unsuitable for durable registration.
 
@@ -66,7 +69,7 @@ The node setup and Promise helpers adapt `cmd/tsconnect/wasm/wasm_js.go` from th
 
 ## CI
 
-[build.yml](.github/workflows/build.yml) runs Go tests, the WASM build and smoke test, Node tests, and a WASM dependency check on pushes and pull requests. It uses Go from `go.mod` and Node 22. Monday at 09:23 UTC, the scheduled matrix checks both pinned dependencies and `tailscale.com@latest` with `go mod tidy`. Both modes run the same checks. The latest mode changes only its job checkout and does not commit dependency updates. Manual dispatch checks the pinned dependencies.
+[build.yml](.github/workflows/build.yml) runs Go tests, the js/wasm Go tests in `wasm/`, the WASM build and smoke test, Node tests, and a WASM dependency check on pushes and pull requests. It uses Go from `go.mod` and Node 22. Monday at 09:23 UTC, the scheduled matrix checks both pinned dependencies and `tailscale.com@latest` with `go mod tidy`. Both modes run the same checks. The latest mode changes only its job checkout and does not commit dependency updates. Manual dispatch checks the pinned dependencies.
 
 The schedule starts only after the workflow exists on the default branch. Enable GitHub Actions failure notifications for this repository in your GitHub notification settings and inspect the Actions tab after scheduled runs. Check that schedules remain enabled, especially after repository inactivity. A latest failure calls for reviewing upstream internals and the copied setup code; it does not automatically update the pin. Review action versions when updating this workflow, and use full action SHAs if repository policy requires them. Local checks do not establish that GitHub CI or the latest-dependency job has run.
 

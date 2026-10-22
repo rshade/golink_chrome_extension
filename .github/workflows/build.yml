@@ -29,6 +29,9 @@ jobs:
           go get tailscale.com@latest
           go mod tidy
       - run: go test ./...
+      # go test ./... skips the js-only bridge and state tests in wasm/.
+      - name: Run js/wasm Go tests
+        run: GOOS=js GOARCH=wasm go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./wasm
       - run: ./build.sh
       - run: node scripts/wasm-smoke.cjs
       - run: node --test

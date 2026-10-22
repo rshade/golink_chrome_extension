@@ -15,7 +15,7 @@ const timer = setTimeout(() => { console.error('WASM API startup timed out'); pr
     assert.equal(typeof golinkExt[method], 'function', method);
   }
   // No start call: this smoke check must not create a node or contact a tailnet.
-  for (const [method, args] of [['login', []], ['logout', []], ['status', []], ['resolve', ['demo']], ['save', ['demo', 'https://example.com']], ['links', []]]) {
+  for (const [method, args] of [['login', []], ['logout', []], ['status', []], ['resolve', ['demo']], ['save', ['demo', 'https://example.com', false]], ['links', []]]) {
     const promise = golinkExt[method](...args);
     assert.ok(promise instanceof Promise, `${method} returns a Promise`);
     await assert.rejects(promise, /node is not started/);

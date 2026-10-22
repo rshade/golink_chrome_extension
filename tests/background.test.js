@@ -11,9 +11,10 @@ function storage(initial = {}) {
   const data = structuredClone(initial);
   return { data, async get(keys) { return Object.fromEntries(keys.filter(key => key in data).map(key => [key, structuredClone(data[key])])); }, async set(values) { Object.assign(data, structuredClone(values)); }, async remove(keys) { for (const key of keys) delete data[key]; } };
 }
-function fixture({ cache, session, node = {}, handleEvent } = {}) {
+function fixture({ cache, session, node = {}, handleEvent, openTabs = {} } = {}) {
   const local = storage({ tsState: { epoch: 1, values: {} }, hostname: 'golink-ext-aabbcc', golinkHost: 'go', controlURL: 'https://controlplane.tailscale.com', ...(cache ? { linksCache: cache } : {}) });
   const calls = [], tabs = [], rules = [];
+  const open = new Map(Object.entries(openTabs).map(([id, url]) => [Number(id), url]));
   const contexts = [{ contextType: 'TAB', contextId: 'status-context', documentId: 'status-document', documentUrl: 'chrome-extension://extension/status.html?resolve=foo', documentOrigin: 'chrome-extension://extension', frameId: 0, tabId: 42, windowId: 1, incognito: false }];
   const chrome = {
     runtime: { id: 'extension', getURL: path => 'chrome-extension://extension/' + path, onMessage: event(), onInstalled: event(), onStartup: event(), async getContexts(filter) {
@@ -24,7 +25,13 @@ function fixture({ cache, session, node = {}, handleEvent } = {}) {
     } },
     omnibox: { onInputChanged: event(), onInputEntered: event() },
     storage: { local, session: session ?? storage() },
-    tabs: { async create(options) { tabs.push({ action: 'create', ...options }); return { id: 10 }; }, async update(id, options) { tabs.push({ action: 'update', id, ...options }); return { id }; }, async remove(id) { tabs.push({ action: 'remove', id }); }, async query() { return [{ id: 7 }]; } },
+    tabs: {
+      async create(options) { tabs.push({ action: 'create', ...options }); open.set(10, options.url); return { id: 10 }; },
+      async update(id, options) { tabs.push({ action: 'update', id, ...options }); if (options.url) open.set(id, options.url); return { id }; },
+      async remove(id) { tabs.push({ action: 'remove', id }); open.delete(id); },
+      async get(id) { if (!open.has(id)) throw new Error('No tab with id: ' + id); return { id, url: open.get(id) }; },
+      async query() { return [{ id: 7 }]; },
+    },
     declarativeNetRequest: { async getDynamicRules() { return structuredClone(rules); }, async updateDynamicRules(update) { calls.push(['rules', update]); rules.splice(0, rules.length, ...update.addRules); } },
   };
   const lifecycle = {
@@ -37,7 +44,7 @@ function fixture({ cache, session, node = {}, handleEvent } = {}) {
   const sender = { id: 'extension', url: 'chrome-extension://extension/status.html?resolve=foo', documentId: 'status-document', frameId: 0, tab: { id: 42 } };
   const page = (method, args = []) => background.handleMessage({ channel: 'golink', target: 'worker', method, args }, sender);
   const offscreen = message => background.handleMessage({ channel: 'golink', target: 'worker', docId: 'doc', epoch: 1, ...message }, { id: 'extension', url: 'chrome-extension://extension/offscreen.html' });
-  return { background, chrome, lifecycle, local, store, calls, tabs, rules, contexts, page, offscreen, sender };
+  return { background, chrome, lifecycle, local, store, calls, tabs, open, rules, contexts, page, offscreen, sender };
 }
 
 test('typing filters stale local links without starting or refreshing the node', async () => {
@@ -90,116 +97,53 @@ test('resolve waits for Running and sends the raw path unchanged', async () => {
   assert.equal(f.calls.some(([method]) => method === 'resolve'), false);
   running = true;
   const result = await f.page('resolve', ['foo/a%2Fb?x=1&x=2']);
-  assert.equal(result.ok, true);
-  assert.deepEqual(f.tabs[0], { action: 'update', id: 42, url: 'https://target.example/foo/a%2Fb?x=1&x=2' });
+  assert.deepEqual(result, { ok: true, value: { redirect: 'https://target.example/foo/a%2Fb?x=1&x=2', navigate: 'https://target.example/foo/a%2Fb?x=1&x=2' } });
+  // The status page navigates itself so that it leaves no history entry.
+  assert.deepEqual(f.tabs, []);
 });
 
-test('only http and https resolve targets navigate the sender tab', async () => {
+test('only http and https resolve targets are offered for navigation', async () => {
   for (const target of ['javascript:alert(1)', 'data:text/html,bad', 'file:///etc/passwd', '/relative']) {
     const f = fixture({ node: { resolve: () => ({ redirect: target }) } });
     const reply = await f.page('resolve', ['foo']);
     assert.equal(reply.ok, false, target);
     assert.equal(reply.error.kind, 'url');
-    assert.equal(f.tabs.length, 0);
   }
   const f = fixture({ node: { resolve: () => ({ redirect: 'http://example.com/a%2Fb?x=1&x=2#part' }) } });
-  const reply = await f.background.handleMessage({ channel: 'golink', target: 'worker', method: 'resolve', args: ['foo'], tabId: 999 }, f.sender);
-  assert.equal(reply.ok, true);
-  assert.equal(f.tabs[0].id, 42);
-  assert.equal(f.tabs[0].url, 'http://example.com/a%2Fb?x=1&x=2#part');
+  const reply = await f.page('resolve', ['foo']);
+  assert.equal(reply.value.navigate, 'http://example.com/a%2Fb?x=1&x=2#part');
 });
 
 test('not found and golink UI resolve results open safe local modes', async () => {
   const missing = fixture({ node: { resolve: () => ({ notFound: true }) } });
-  await missing.page('resolve', ['bad<img>/a?x=1']);
-  assert.equal(missing.tabs[0].url, 'chrome-extension://extension/status.html?create=bad%3Cimg%3E');
+  assert.equal((await missing.page('resolve', ['bad<img>/a?x=1'])).value.navigate, 'chrome-extension://extension/status.html?create=bad%3Cimg%3E');
   const ui = fixture({ node: { resolve: () => ({ golinkUI: '/.detail/foo?x=<script>' }) } });
-  await ui.page('resolve', ['foo+']);
-  assert.equal(ui.tabs[0].url, 'chrome-extension://extension/status.html?golinkUI=%2F.detail%2Ffoo%3Fx%3D%3Cscript%3E');
+  assert.equal((await ui.page('resolve', ['foo+'])).value.navigate, 'chrome-extension://extension/status.html?golinkUI=%2F.detail%2Ffoo%3Fx%3D%3Cscript%3E');
 });
 
-const navigationResults = [
-  ['redirect', { redirect: 'https://target.example/foo' }, 'https://target.example/foo'],
-  ['create', { notFound: true }, 'chrome-extension://extension/status.html?create=foo'],
-  ['golinkUI', { golinkUI: '/.detail/foo' }, 'chrome-extension://extension/status.html?golinkUI=%2F.detail%2Ffoo'],
-];
-
-for (const [mode, result, destination] of navigationResults) {
-  test(`delayed ${mode} result leaves a navigated-away document alone`, async () => {
-    const lookup = deferred(), started = deferred();
-    const f = fixture({ node: { resolve() { started.resolve(); return lookup.promise; } } });
-    const pending = f.page('resolve', ['foo']);
-    await started.promise;
-    // Chrome no longer exposes the original extension document after navigation.
-    f.contexts.splice(0);
-    lookup.resolve(result);
-    await pending;
-    assert.deepEqual(f.tabs, []);
-  });
-
-  for (const sameDocument of [true, false]) {
-    test(`delayed ${mode} result cannot replace a newer request in ${sameDocument ? 'the same' : 'a new'} document`, async () => {
-      const lookup = deferred(), started = deferred(), newStatus = deferred();
-      let statuses = 0;
-      const f = fixture({ node: {
-        status() { return ++statuses === 1 ? { state: 'Running' } : newStatus.promise; },
-        resolve(path) { if (path === 'foo') { started.resolve(); return lookup.promise; } return { redirect: 'https://new.example/bar' }; },
-      } });
-      const pending = f.page('resolve', ['foo']);
-      await started.promise;
-      const sender = { ...f.sender, documentId: sameDocument ? f.sender.documentId : 'new-status-document' };
-      if (!sameDocument) f.contexts.splice(0, 1, { ...f.contexts[0], documentId: sender.documentId });
-      const newer = f.background.handleMessage({ channel: 'golink', target: 'worker', method: 'resolve', args: ['bar'] }, sender);
-      lookup.resolve(result);
-      await pending;
-      assert.deepEqual(f.tabs, []);
-      newStatus.resolve({ state: 'Running' });
-      assert.equal((await newer).ok, true);
-      assert.deepEqual(f.tabs, [{ action: 'update', id: 42, url: 'https://new.example/bar' }]);
-    });
-  }
-
-  test(`delayed ${mode} result navigates its live originating document`, async () => {
-    const lookup = deferred(), started = deferred();
-    const f = fixture({ node: { resolve() { started.resolve(); return lookup.promise; } } });
-    const pending = f.page('resolve', ['foo']);
-    await started.promise;
-    lookup.resolve(result);
-    assert.equal((await pending).ok, true);
-    assert.deepEqual(f.tabs, [{ action: 'update', id: 42, url: destination }]);
-  });
-}
-
-test('resolve fails closed when the originating document cannot be verified', async () => {
-  for (const reason of ['missing document ID', 'missing API', 'API failure', 'wrong tab', 'wrong document', 'subframe']) {
-    const f = fixture({ node: { resolve: () => ({ redirect: 'https://target.example/' }) } });
-    if (reason === 'missing document ID') delete f.sender.documentId;
-    if (reason === 'missing API') delete f.chrome.runtime.getContexts;
-    if (reason === 'API failure') f.chrome.runtime.getContexts = async () => { throw new Error('Context lookup failed'); };
-    if (reason === 'wrong tab') f.contexts[0].tabId = 99;
-    if (reason === 'wrong document') f.contexts[0].documentId = 'other-document';
-    if (reason === 'subframe') f.contexts[0].frameId = 1;
-    await f.page('resolve', ['foo']);
-    assert.deepEqual(f.tabs, [], reason);
-  }
+test('targets back into http://go/ resolve in the worker instead of reentering the redirect rule', async () => {
+  const targets = { a: 'http://go/b#ignored', b: 'HTTP://GO/c?x=1', 'c?x=1': 'https://final.example/' };
+  const f = fixture({ node: { resolve: path => (path in targets ? { redirect: targets[path] } : { notFound: true }) } });
+  assert.equal((await f.page('resolve', ['a'])).value.navigate, 'https://final.example/');
+  assert.deepEqual(f.calls.filter(([method]) => method === 'resolve').map(([, args]) => args[0]), ['a', 'b', 'c?x=1']);
+  const missing = fixture({ node: { resolve: path => (path === 'a' ? { redirect: 'http://go/gone/x' } : { notFound: true }) } });
+  assert.equal((await missing.page('resolve', ['a'])).value.navigate, 'chrome-extension://extension/status.html?create=gone');
 });
 
-test('a newer resolve arriving during the document check keeps navigation ownership', async () => {
-  const release = deferred();
-  const f = fixture({ node: { resolve: path => ({ redirect: 'https://target.example/' + path }) } });
-  const getContexts = f.chrome.runtime.getContexts;
-  let checks = 0;
-  f.chrome.runtime.getContexts = async filter => {
-    const contexts = await getContexts(filter);
-    if (++checks === 1) await release.promise;
-    return contexts;
-  };
-  const older = f.page('resolve', ['foo']);
+test('a go link cycle fails instead of navigating forever', async () => {
+  const f = fixture({ node: { resolve: () => ({ redirect: 'http://go/self' }) } });
+  const reply = await f.page('resolve', ['self']);
+  assert.equal(reply.ok, false);
+  assert.equal(reply.error.kind, 'loop');
+  assert.equal(f.calls.filter(([method]) => method === 'resolve').length, 11);
+  assert.deepEqual(f.tabs, []);
+});
+
+test('a resolve runs before the cache refresh its status check starts', async () => {
+  const f = fixture({ cache: { fetchedAt: 0, links: [] }, node: { resolve: () => ({ redirect: 'https://target.example/' }) } });
+  await f.page('resolve', ['foo']);
   await tick();
-  assert.equal((await f.page('resolve', ['bar'])).ok, true);
-  release.resolve();
-  await older;
-  assert.deepEqual(f.tabs, [{ action: 'update', id: 42, url: 'https://target.example/bar' }]);
+  assert.deepEqual(f.calls.map(([method]) => method), ['status', 'resolve', 'links']);
 });
 
 test('unreachable resolves return an error envelope and leave the status tab in place', async () => {
@@ -236,7 +180,7 @@ test('runtime listener keeps the response channel open for async page replies', 
 
 test('offscreen events retain the sender and only accepted state events cause browser effects', async () => {
   let accepted = false;
-  const f = fixture({ session: storage({ golinkLoginTabId: 77 }), handleEvent: () => ({ ok: true, value: { accepted } }) });
+  const f = fixture({ session: storage({ golinkLoginTab: { id: 77, url: 'https://login.example/a/77' } }), openTabs: { 77: 'https://login.example/a/77' }, handleEvent: () => ({ ok: true, value: { accepted } }) });
   assert.deepEqual(await f.offscreen({ type: 'state', state: 'Running' }), { ok: true, value: { accepted: false } });
   await tick();
   assert.equal(f.tabs.length, 0);
@@ -262,17 +206,39 @@ test('login events reuse one session login tab and durable Running closes it aft
   assert.deepEqual(await f.page('login'), { ok: true, value: { ok: true } });
   await Promise.all([f.offscreen({ type: 'browseToURL', url: 'https://login.example/one' }), f.offscreen({ type: 'browseToURL', url: 'https://login.example/two' })]);
   assert.equal(f.tabs.filter(tab => tab.action === 'create').length, 1);
-  assert.equal(session.data.golinkLoginTabId, 10);
+  assert.deepEqual(session.data.golinkLoginTab, { id: 10, url: 'https://login.example/two' });
   assert.equal(f.tabs.at(-1).url, 'https://login.example/two');
-  const recovered = fixture({ session });
+  const recovered = fixture({ session, openTabs: { 10: 'https://login.example/two/success' } });
   await recovered.offscreen({ type: 'state', state: 'Running' });
   await tick();
   assert.deepEqual(recovered.tabs[0], { action: 'remove', id: 10 });
-  assert.equal(session.data.golinkLoginTabId, undefined);
+  assert.equal(session.data.golinkLoginTab, undefined);
+});
+
+for (const [place, url] of [['another site', 'https://mail.example/draft'], ['the admin console', 'https://login.example/admin/machines']]) {
+  test(`a login tab the user moved to ${place} is neither closed nor reused`, async () => {
+    const session = storage({ golinkLoginTab: { id: 10, url: 'https://login.example/a/one' } });
+    const f = fixture({ session, openTabs: { 10: url } });
+    await f.offscreen({ type: 'state', state: 'Running' });
+    await tick();
+    assert.deepEqual(f.tabs, []);
+    assert.equal(session.data.golinkLoginTab, undefined);
+    session.data.golinkLoginTab = { id: 10, url: 'https://login.example/a/one' };
+    await f.offscreen({ type: 'browseToURL', url: 'https://login.example/a/two' });
+    assert.deepEqual(f.tabs, [{ action: 'create', url: 'https://login.example/a/two', active: true }]);
+  });
+}
+
+test('replacing the node closes a login tab for its discarded key', async () => {
+  for (const method of ['logout', 'reset', 'configure']) {
+    const f = fixture({ session: storage({ golinkLoginTab: { id: 77, url: 'https://login.example/a/77' } }), openTabs: { 77: 'https://login.example/a/77' } });
+    assert.equal((await f.page(method, method === 'configure' ? [{ golinkHost: 'go' }] : [])).ok, true);
+    assert.deepEqual(f.tabs, [{ action: 'remove', id: 77 }], method);
+  }
 });
 
 test('browse rejects unsafe URLs and handles an already closed login tab', async () => {
-  const f = fixture({ session: storage({ golinkLoginTabId: 99 }) });
+  const f = fixture({ session: storage({ golinkLoginTab: { id: 99, url: 'https://login.example/a/99' } }) });
   f.chrome.tabs.update = async () => { throw new Error('No tab'); };
   const bad = await f.offscreen({ type: 'browseToURL', url: 'javascript:bad()' });
   assert.equal(bad.ok, false);
@@ -282,7 +248,7 @@ test('browse rejects unsafe URLs and handles an already closed login tab', async
   f.chrome.tabs.remove = async () => { throw new Error('No tab'); };
   await f.offscreen({ type: 'state', state: 'Running' });
   await tick();
-  assert.equal(f.chrome.storage.session.data.golinkLoginTabId, undefined);
+  assert.equal(f.chrome.storage.session.data.golinkLoginTab, undefined);
 });
 
 test('cachedLinks is local-only and concurrent stale status requests share one refresh', async () => {
@@ -300,10 +266,12 @@ test('cachedLinks is local-only and concurrent stale status requests share one r
 
 test('successful save refreshes fresh cache and survives refresh failure', async () => {
   const f = fixture({ cache: { fetchedAt: 999_999, links: [] }, node: { links: () => [{ short: 'saved', long: 'https://saved', owner: 'test' }] } });
-  assert.deepEqual(await f.page('save', ['saved', 'https://saved']), { ok: true, value: { ok: true } });
+  assert.deepEqual(await f.page('save', ['saved', 'https://saved', false]), { ok: true, value: { ok: true } });
+  assert.deepEqual(f.calls.find(([method]) => method === 'save'), ['save', ['saved', 'https://saved', false]]);
+  assert.equal((await f.page('save', ['saved', 'https://saved', 'yes'])).ok, false);
   assert.equal(f.local.data.linksCache.links[0].short, 'saved');
   const failed = fixture({ cache: { fetchedAt: 999_999, links: [] }, node: { links() { throw Object.assign(new Error('temporarily unreachable'), { kind: 'unreachable' }); } } });
-  const reply = await failed.page('save', ['saved', 'https://saved']);
+  const reply = await failed.page('save', ['saved', 'https://saved', true]);
   assert.equal(reply.ok, true);
   assert.equal(reply.value.ok, true);
   assert.deepEqual(reply.value.cacheRefreshError, { kind: 'unreachable', message: 'temporarily unreachable' });
@@ -337,10 +305,54 @@ test('logout, auth key, and configuration use lifecycle replacement with no key 
   assert.equal((await f.page('configure', [{ golinkHost: 'https://evil/path' }])).ok, false);
 });
 
+test('settings are stored in a form that Go also accepts', async () => {
+  for (const [input, golinkHost] of [['Go.Example.ts.net', 'go.example.ts.net'], ['go:80', 'go'], ['go:8080', 'go:8080'], ['[::1]:80', '[::1]'], ['go.', 'go.']]) {
+    const f = fixture();
+    assert.equal((await f.page('configure', [{ golinkHost: input }])).ok, true, input);
+    assert.equal(f.local.data.golinkHost, golinkHost, input);
+  }
+  for (const [input, controlURL] of [['http:control.example', 'http://control.example'], ['https://control.example\\path', 'https://control.example/path'], ['HTTPS://Control.Example/', 'https://control.example']]) {
+    const f = fixture();
+    assert.equal((await f.page('configure', [{ controlURL: input }])).ok, true, input);
+    assert.equal(f.local.data.controlURL, controlURL, input);
+  }
+  for (const config of [{ golinkHost: 'go{x' }, { golinkHost: 'go:65536' }, { golinkHost: 'go%41' }, { controlURL: 'https://user@control.example' }]) {
+    const f = fixture();
+    const reply = await f.page('configure', [config]);
+    assert.equal(reply.ok, false, JSON.stringify(config));
+    assert.equal(f.local.data.golinkHost, 'go');
+    assert.equal(f.local.data.controlURL, 'https://controlplane.tailscale.com');
+  }
+});
+
+test('a woken worker does not export again for a fresh cache, and failed exports back off', async () => {
+  const fresh = fixture({ cache: { fetchedAt: 999_000, links: [] } });
+  // A new worker has no previous state; Running is not evidence of a new login.
+  await fresh.offscreen({ type: 'state', state: 'Running' });
+  await fresh.page('status');
+  await tick();
+  assert.equal(fresh.calls.filter(([method]) => method === 'links').length, 0);
+  const login = fixture({ cache: { fetchedAt: 999_000, links: [] } });
+  await login.offscreen({ type: 'state', state: 'NeedsLogin' });
+  await login.offscreen({ type: 'state', state: 'Running' });
+  await tick();
+  assert.equal(login.calls.filter(([method]) => method === 'links').length, 1);
+
+  let clock = 1_000_000;
+  const failing = fixture({ cache: { fetchedAt: 0, links: [] }, node: { links() { throw Object.assign(new Error('down'), { kind: 'unreachable' }); } } });
+  const background = createBackground({ chrome: failing.chrome, lifecycle: failing.lifecycle, store: failing.store, now: () => clock });
+  const page = method => background.handleMessage({ channel: 'golink', target: 'worker', method, args: [] }, failing.sender);
+  for (let poll = 0; poll < 5; poll++) { await page('status'); await tick(); clock += 2000; }
+  assert.equal(failing.calls.filter(([method]) => method === 'links').length, 1);
+  clock += 60_000;
+  await page('status');
+  await tick();
+  assert.equal(failing.calls.filter(([method]) => method === 'links').length, 2);
+});
+
 test('the empty root path resolves to the golink UI explanation', async () => {
   const f = fixture({ node: { resolve: path => { assert.equal(path, ''); return { golinkUI: '/' }; } } });
-  assert.deepEqual(await f.page('resolve', ['']), { ok: true, value: { golinkUI: '/' } });
-  assert.equal(f.tabs[0].url, 'chrome-extension://extension/status.html?golinkUI=%2F');
+  assert.deepEqual(await f.page('resolve', ['']), { ok: true, value: { golinkUI: '/', navigate: 'chrome-extension://extension/status.html?golinkUI=%2F' } });
 });
 
 test('an equivalent Chrome rule with reordered object keys does not cause a repair', async () => {
@@ -377,7 +389,7 @@ test('reset waits for a cache write already in progress before clearing it', asy
 });
 
 test('real worker registration routes durable writes through lifecycle without deadlock and injects session storage', { timeout: 2000 }, async t => {
-  const f = fixture({ session: storage({ golinkLoginTabId: 77 }) });
+  const f = fixture({ session: storage({ golinkLoginTab: { id: 77, url: 'https://login.example/a/77' } }), openTabs: { 77: 'https://login.example/a/77' } });
   const { chrome } = f;
   let bridge, contexts = [], documentNumber = 0;
   const bridges = [], responses = [];
@@ -436,8 +448,7 @@ test('real worker registration routes durable writes through lifecycle without d
   assert.deepEqual(f.local.data.tsState.values, { identity: 'aWQ=' });
   assert.equal(chrome.storage.session.data.golinkOffscreenUsed, true);
   assert.deepEqual(f.tabs[0], { action: 'remove', id: 77 });
-  assert.equal((await request('resolve', ['foo'])).ok, true);
-  assert.deepEqual(f.tabs[1], { action: 'update', id: 42, url: 'https://target.example' });
+  assert.equal((await request('resolve', ['foo'])).value.navigate, 'https://target.example');
   assert.deepEqual(await request('reset'), { ok: true, value: { ok: true } });
   assert.equal(f.local.data.tsState.epoch, 2);
   assert.deepEqual(f.local.data.tsState.values, {});

@@ -325,8 +325,10 @@ test('auth keys start a replacement only from NeedsLogin and never reach storage
   const configs = [];
   let state = 'Running';
   const f = fixture({ apiFactory(api) {
-    api.start = async config => { configs.push(structuredClone(config)); return { ok: true }; };
-    api.status = async () => ({ state });
+    let keyed = false;
+    api.start = async config => { configs.push(structuredClone(config)); keyed = config.authKey !== undefined; return { ok: true }; };
+    // A node started with a valid key registers and leaves NeedsLogin.
+    api.status = async () => ({ state: keyed ? 'Starting' : state });
   } });
   t.after(() => f.dispose());
   await f.lifecycle.ensureOffscreen();
@@ -342,6 +344,28 @@ test('auth keys start a replacement only from NeedsLogin and never reach storage
   await f.lifecycle.ensureOffscreen();
   assert.equal(configs[2].authKey, undefined);
 });
+
+for (const [outcome, status, expected] of [
+  ['rejected', { state: 'NeedsLogin', backendError: 'invalid authkey' }, /Auth-key login failed/],
+  ['unanswered', { state: 'NeedsLogin', backendError: '' }, /Auth-key login timed out/],
+]) {
+  test(`a ${outcome} auth key is not kept in a node that a later Log in would reuse`, async t => {
+    const configs = [];
+    const f = fixture({ apiFactory(api) {
+      let keyed = false;
+      api.start = async config => { configs.push(structuredClone(config)); keyed = config.authKey !== undefined; return { ok: true }; };
+      api.status = async () => (keyed ? status : { state: 'NeedsLogin', backendError: '' });
+    } });
+    const lifecycle = createLifecycle({ runtime: f.runtime, offscreen: f.offscreen, store: f.store, session: f.session, authKeyTimeoutMs: 30, pollMs: 5 });
+    t.after(() => { lifecycle.dispose(); return f.dispose(); });
+    await lifecycle.ensureOffscreen();
+    const failure = await lifecycle.restart({ clear: true, authKey: 'tskey-secret' }).catch(error => error);
+    assert.match(failure.message, expected);
+    assert.equal(failure.kind, 'authKey');
+    assert.deepEqual(configs.map(config => config.authKey), [undefined, 'tskey-secret', undefined]);
+    assert.deepEqual(await f.store.snapshot(), { epoch: 3, values: {} });
+  });
+}
 
 test('a worker awakened by a write validates hello without starting or deadlocking the node', async t => {
   let callbacks;

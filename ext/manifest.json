@@ -8,6 +8,6 @@
   "background": {"service_worker": "background.js", "type": "module"},
   "action": {"default_popup": "status.html"},
   "omnibox": {"keyword": "go"},
-  "web_accessible_resources": [{"resources": ["status.html"], "matches": ["http://go/*"]}],
+  "web_accessible_resources": [{"resources": ["status.html"], "matches": ["<all_urls>"]}],
   "content_security_policy": {"extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"}
 }

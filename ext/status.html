@@ -28,8 +28,10 @@
       <label for="short">Short name</label>
       <input id="short" required placeholder="docs" autocomplete="off" autocapitalize="off" spellcheck="false">
       <label for="long">Target URL</label>
-      <input id="long" type="url" required placeholder="https://example.com" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <input id="long" inputmode="url" required placeholder="https://example.com" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="long-help">
+      <p id="long-help" class="help">A URL, a path such as /other-link, or a golink template.</p>
       <button type="submit">Save link</button>
+      <button id="replace" class="secondary" type="button" hidden>Replace existing link</button>
     </form>
     <section id="ui-panel" aria-labelledby="ui-heading" hidden>
       <h2 id="ui-heading">Open golink's web UI</h2>

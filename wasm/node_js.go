@@ -14,6 +14,8 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
+	"sync"
 	"time"
 
 	"golink-chrome-extension/golinkclient"
@@ -22,6 +24,7 @@ import (
 	"tailscale.com/logpolicy"
 	"tailscale.com/logtail"
 	"tailscale.com/net/netns"
+	"tailscale.com/net/tlsdial"
 	"tailscale.com/net/tsdial"
 	"tailscale.com/tsd"
 	"tailscale.com/wgengine"
@@ -37,7 +40,18 @@ type node struct {
 	lb       *ipnlocal.LocalBackend
 	client   *golinkclient.Client
 	hostname string
+	errors   *lastError
 }
+
+// lastError keeps the backend's most recent user-visible error, such as a
+// rejected auth key, which arrives only as Notify.ErrMessage.
+type lastError struct {
+	mu      sync.Mutex
+	message string
+}
+
+func (e *lastError) set(message string) { e.mu.Lock(); e.message = message; e.mu.Unlock() }
+func (e *lastError) get() string        { e.mu.Lock(); defer e.mu.Unlock(); return e.message }
 
 func newNode(config nodeConfig, callbacks *callbacks) (_ *node, err error) {
 	store, err := newStateStore(config.state, func(key string, value any) error {
@@ -124,13 +138,24 @@ func newNode(config nodeConfig, callbacks *callbacks) (_ *node, err error) {
 	if err := ns.Start(lb); err != nil {
 		return nil, fmt.Errorf("start netstack: %w", err)
 	}
+	backendErrors := &lastError{}
 	lb.SetNotifyCallback(func(n ipn.Notify) {
 		defer func() {
 			if r := recover(); r != nil {
 				callbacks.fatal(fmt.Sprintf("backend notification panic: %v", r))
 			}
 		}()
+		if n.ErrMessage != nil {
+			message := *n.ErrMessage
+			if config.authKey != "" {
+				message = strings.ReplaceAll(message, config.authKey, "[auth key]")
+			}
+			backendErrors.set(message)
+		}
 		if n.State != nil {
+			if *n.State == ipn.Running {
+				backendErrors.set("")
+			}
 			callbacks.call("onState", n.State.String())
 		}
 		if n.BrowseToURL != nil {
@@ -140,29 +165,49 @@ func newNode(config nodeConfig, callbacks *callbacks) (_ *node, err error) {
 	if err := callbacks.call("onState", ipn.NoState.String()); err != nil {
 		return nil, err
 	}
+	// Logout persists LoggedOut before asking control to expire the key. If that
+	// request fails, the registered identity remains; keep it logged out so the
+	// next start does not silently log back in. Interactive login clears
+	// LoggedOut. New profiles also default to LoggedOut, but have no node ID.
+	prefs := lb.Prefs()
+	loggedOut := prefs.LoggedOut() && prefs.Persist().Valid() && prefs.Persist().NodeID() != ""
 	if err := lb.Start(ipn.Options{
 		UpdatePrefs: &ipn.Prefs{
 			ControlURL:  config.controlURL,
 			RouteAll:    false,
-			WantRunning: true,
+			WantRunning: !loggedOut,
+			LoggedOut:   loggedOut,
 			Hostname:    config.hostname,
 		},
 		AuthKey: config.authKey,
 	}); err != nil {
 		return nil, fmt.Errorf("start backend: %w", err)
 	}
+	// Start only registers a node that already has a key. As in tailscale up,
+	// a new node must start a login, which uses the auth key without a URL.
+	if config.authKey != "" {
+		if err := lb.StartLoginInteractive(context.Background()); err != nil {
+			return nil, fmt.Errorf("start auth key login: %w", err)
+		}
+	}
 	httpClient := &http.Client{
-		Transport:     &http.Transport{DialContext: dialer.UserDial, Proxy: nil},
+		Transport: &http.Transport{
+			DialContext: dialer.UserDial,
+			Proxy:       nil,
+			// golink's HTTPS listener uses a Let's Encrypt certificate. The browser
+			// runtime has no system roots, so tlsdial falls back to baked-in roots.
+			TLSClientConfig: tlsdial.Config(sys.HealthTracker.Get(), nil),
+		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	return &node{lb: lb, client: &golinkclient.Client{HTTP: httpClient, Host: config.golinkHost}, hostname: config.hostname}, nil
+	return &node{lb: lb, client: &golinkclient.Client{HTTP: httpClient, Host: config.golinkHost}, hostname: config.hostname, errors: backendErrors}, nil
 }
 
 func (n *node) status() map[string]any {
 	status := n.lb.StatusWithoutPeers()
 	result := map[string]any{
 		"state": status.BackendState, "loginName": "", "tailnet": "",
-		"hostname": n.hostname, "golinkReachable": false,
+		"hostname": n.hostname, "golinkReachable": false, "backendError": n.errors.get(),
 	}
 	if status.Self != nil {
 		result["loginName"] = status.User[status.Self.UserID].LoginName
@@ -171,16 +216,7 @@ func (n *node) status() map[string]any {
 		result["tailnet"] = status.CurrentTailnet.Name
 	}
 	if status.BackendState == ipn.Running.String() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+n.client.Host+"/", nil)
-		if err == nil {
-			resp, err := n.client.HTTP.Do(req)
-			if err == nil {
-				resp.Body.Close()
-				result["golinkReachable"] = resp.StatusCode >= 200 && resp.StatusCode < 300
-			}
-		}
+		result["golinkReachable"] = n.client.Ping(context.Background())
 	}
 	return result
 }

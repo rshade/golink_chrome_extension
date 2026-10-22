@@ -16,17 +16,30 @@ function goResult(value) {
 
 export function createOffscreenBridge({ runtime, loadGo, docId, timeoutMs = 30_000 }) {
   let api, started = false, epoch = null, startPromise, disposed = false;
-  let persistenceFailure, fatalError, publication = Promise.resolve();
+  let persistenceFailure, fatalError, haltError, publication = Promise.resolve();
   const pendingWrites = new Set();
-  let rejectFatal;
-  const fatal = new Promise((_, reject) => { rejectFatal = reject; });
-  fatal.catch(() => {});
+  // Racing each request against one long-lived fatal promise would keep every
+  // settled result reachable from it. Waiters remove themselves instead.
+  const fatalWaiters = new Set();
+  function halt(error) {
+    if (haltError) return;
+    haltError = error;
+    for (const reject of fatalWaiters) reject(error);
+    fatalWaiters.clear();
+  }
+  function untilFatal(promise) {
+    if (haltError) return Promise.reject(haltError);
+    return new Promise((resolve, reject) => {
+      fatalWaiters.add(reject);
+      promise.then(resolve, reject).finally(() => fatalWaiters.delete(reject));
+    });
+  }
   const send = (type, fields = {}) => runtime.sendMessage({ channel: 'golink', target: 'worker', type, docId, epoch, ...fields });
 
   function reportFatal(error) {
     if (fatalError || disposed) return;
     fatalError = error instanceof Error ? error : new Error(String(error));
-    rejectFatal(fatalError);
+    halt(fatalError);
     Promise.resolve().then(() => send('fatal', { message: fatalError.message })).catch(() => {});
   }
   async function flushWrites() {
@@ -67,7 +80,7 @@ export function createOffscreenBridge({ runtime, loadGo, docId, timeoutMs = 30_0
     );
     return loaded.apiReady;
   });
-  const ready = bounded(Promise.race([loading, fatal]), timeoutMs).then(value => {
+  const ready = bounded(untilFatal(loading), timeoutMs).then(value => {
     if (disposed) throw new Error('Offscreen document closed');
     api = value;
     // A worker may have restarted while compiling. hello recovers a missed ready.
@@ -85,7 +98,7 @@ export function createOffscreenBridge({ runtime, loadGo, docId, timeoutMs = 30_0
       }
       if (!methods.has(message.method)) throw new Error('Unknown node method');
       if (message.docId !== docId || !Number.isSafeInteger(message.epoch) || message.epoch < 1 || (epoch !== null && message.epoch !== epoch)) throw new Error('Stale document or epoch');
-      await Promise.race([ready, fatal]);
+      await untilFatal(ready);
       let operation;
       if (message.method === 'start') {
         if (!startPromise) {
@@ -101,14 +114,14 @@ export function createOffscreenBridge({ runtime, loadGo, docId, timeoutMs = 30_0
         operation = Promise.resolve().then(() => api[message.method](...message.args)).then(goResult)
           .then(async result => { await flushWrites(); return result; });
       }
-      return { ok: true, value: await Promise.race([operation, fatal]) };
+      return { ok: true, value: await untilFatal(operation) };
     } catch (error) { return failure(error); }
   }
   return {
     handleMessage,
     dispose() {
       disposed = true;
-      rejectFatal(new Error('Offscreen document closed'));
+      halt(new Error('Offscreen document closed'));
       runtime.onMessage?.removeListener(listener);
     },
   };

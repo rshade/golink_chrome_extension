@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inputPath, originalURLPath, suggestions, escapeXML, recordFatal } from '../ext/lib.js';
+import { inputPath, originalURLPath, capturedFragment, withFragment, suggestions, escapeXML, recordFatal } from '../ext/lib.js';
 
 test('input preserves escaping and query', () => {
   assert.equal(inputPath(' foo/a%2Fb?x=1&x=2 '), 'foo/a%2Fb?x=1&x=2');
@@ -61,14 +61,36 @@ for (const url of [
   'http://go.example/foo',
   'http://go@evil.example/foo',
   'http://go:8080/foo',
-  'http://go/foo#fragment',
-  'http://go/foo#',
   '/foo',
 ]) {
   test(`captured URL rejects ${JSON.stringify(url)}`, () => {
     assert.throws(() => originalURLPath(url), TypeError);
   });
 }
+
+for (const [url, path, fragment] of [
+  ['http://go/wiki#setup', 'wiki', 'setup'],
+  ['http://go/wiki?x=1#a#b', 'wiki?x=1', 'a#b'],
+  ['http://go/wiki#', 'wiki', ''],
+  ['http://go/wiki', 'wiki', null],
+]) {
+  test(`captured URL ${JSON.stringify(url)} separates its fragment`, () => {
+    assert.equal(originalURLPath(url), path);
+    assert.equal(capturedFragment(url), fragment);
+  });
+}
+
+test('a destination keeps its own fragment and otherwise inherits the captured one', () => {
+  assert.equal(withFragment('https://example.com/a', 'setup'), 'https://example.com/a#setup');
+  assert.equal(withFragment('https://example.com/a#own', 'setup'), 'https://example.com/a#own');
+  assert.equal(withFragment('https://example.com/a', null), 'https://example.com/a');
+});
+
+test('status.html is web accessible from any initiator so clicked go links reach it', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const manifest = JSON.parse(await readFile(new URL('../ext/manifest.json', import.meta.url), 'utf8'));
+  assert.deepEqual(manifest.web_accessible_resources, [{ resources: ['status.html'], matches: ['<all_urls>'] }]);
+});
 
 test('suggestions sort each match group by case-insensitive name with stable case ties', () => {
   const links = ['zDOC', 'docz', 'aDOC', 'Docs', 'docs', 'DocA']

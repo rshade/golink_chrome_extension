@@ -7,7 +7,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 const status = (state, extra = {}) => ({ state, loginName: 'person@example.com', tailnet: 'example.ts.net', hostname: 'golink-ext-abcdef', golinkReachable: true, ...extra });
 
 function fixture({ search = '', hash = '', reply, tab = { url: 'https://example.com/original?x=1' } } = {}) {
-  const calls = [], renders = [], fields = {}, timers = new Map();
+  const calls = [], renders = [], fields = {}, timers = new Map(), navigations = [];
   let handlers, cleared = 0, nextTimer = 0, unbound = false, activeQueries = 0;
   const controller = createStatusController({
     rpc: async (method, args = []) => { calls.push([method, args]); return reply ? reply(method, args) : status('Running'); },
@@ -17,12 +17,12 @@ function fixture({ search = '', hash = '', reply, tab = { url: 'https://example.
       prefill(value) { Object.assign(fields, value); },
       clearAuthKey() { cleared++; },
     },
-    location: { search, hash },
+    location: { search, hash, replace(url) { navigations.push(url); } },
     activeTab: async () => { activeQueries++; return tab; },
     setTimer(callback, delay) { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
     clearTimer(id) { timers.delete(id); },
   });
-  return { controller, calls, renders, fields, timers,
+  return { controller, calls, renders, fields, timers, navigations,
     get handlers() { return handlers; }, get cleared() { return cleared; }, get unbound() { return unbound; }, get activeQueries() { return activeQueries; },
     get last() { return renders.at(-1); },
     async poll() { assert.equal(timers.size, 1); const [id, timer] = [...timers][0]; assert.equal(timer.delay, 2000); timers.delete(id); await timer.callback(); },
@@ -66,7 +66,26 @@ test('popup saves entered short name with original active URL and clears submitt
   assert.equal(f.cleared, 1);
   assert.deepEqual(f.calls.find(([method]) => method === 'authKey'), ['authKey', ['test-secret']]);
   await f.handlers.save({ short: 'docs', long: f.fields.long });
-  assert.deepEqual(f.calls.find(([method]) => method === 'save'), ['save', ['docs', 'https://example.com/original?x=1']]);
+  assert.deepEqual(f.calls.find(([method]) => method === 'save'), ['save', ['docs', 'https://example.com/original?x=1', false]]);
+  assert.match(f.last.message, /saved/i);
+  f.controller.dispose();
+});
+
+test('saving an existing name asks before replacing the shared link', async () => {
+  const f = fixture({ reply: (method, args) => {
+    if (method !== 'save') return status('Running');
+    if (!args[2]) throw Object.assign(new Error('go/docs already points to https://old.example'), { kind: 'exists' });
+    return { ok: true };
+  } });
+  await f.controller.start();
+  await f.handlers.save({ short: 'docs', long: 'https://new.example' });
+  assert.match(f.last.warning, /already points to https:\/\/old\.example.*Replace/);
+  assert.equal(f.last.showReplace, true);
+  assert.equal(f.last.error, '');
+  assert.equal(f.timers.size, 1, 'an existing link is not an error that stops polling');
+  await f.handlers.replace({ short: 'docs', long: 'https://new.example' });
+  assert.deepEqual(f.calls.filter(([method]) => method === 'save').map(([, args]) => args), [['docs', 'https://new.example', false], ['docs', 'https://new.example', true]]);
+  assert.equal(f.last.showReplace, false);
   assert.match(f.last.message, /saved/i);
   f.controller.dispose();
 });
@@ -94,7 +113,7 @@ test('Running shows identity and unreachable ACL guidance', async () => {
   assert.match(f.last.identity, /person@example.com/);
   assert.match(f.last.identity, /example.ts.net/);
   assert.match(f.last.identity, /golink-ext-abcdef/);
-  assert.match(f.last.reachability, /ACL.*go:80/);
+  assert.match(f.last.reachability, /ACL.*golink server/);
   f.controller.dispose();
 });
 
@@ -126,6 +145,27 @@ test('fragment capture preserves the raw suffix including encoded slash and repe
   f.controller.dispose();
 });
 
+for (const [name, result, expected] of [
+  ['a destination without a fragment inherits the captured one', { redirect: 'https://wiki.example/a', navigate: 'https://wiki.example/a' }, 'https://wiki.example/a#setup'],
+  ['a destination keeps its own fragment', { redirect: 'https://wiki.example/a#top', navigate: 'https://wiki.example/a#top' }, 'https://wiki.example/a#top'],
+  ['a local create page ignores the fragment', { notFound: true, navigate: 'chrome-extension://id/status.html?create=wiki' }, 'chrome-extension://id/status.html?create=wiki'],
+]) {
+  test(`direct capture with a fragment: ${name}`, async () => {
+    const f = fixture({ hash: '#http://go/wiki#setup', reply: method => method === 'status' ? status('Running') : result });
+    await f.controller.start();
+    assert.deepEqual(f.calls.find(([method]) => method === 'resolve'), ['resolve', ['wiki']]);
+    assert.deepEqual(f.navigations, [expected]);
+    f.controller.dispose();
+  });
+}
+
+test('golink UI mode matches cached names as golink does, without case or dashes', async () => {
+  const f = fixture({ search: '?golinkUI=%2F.detail%2FMy-Docs', reply: method => method === 'cachedLinks' ? { fetchedAt: 1, links: [{ short: 'mydocs', long: 'https://example.com/', owner: 'person' }] } : status('Running') });
+  await f.controller.start();
+  assert.equal(f.last.cachedLink?.short, 'mydocs');
+  f.controller.dispose();
+});
+
 test('invalid direct capture renders a recoverable error without sending a resolve', async () => {
   const f = fixture({ hash: '#https://other.example/foo' });
   await f.controller.start();
@@ -137,7 +177,7 @@ test('invalid direct capture renders a recoverable error without sending a resol
 });
 
 for (const [kind, message, expected] of [
-  ['unreachable', 'dial failed', /ACL.*go:80/],
+  ['unreachable', 'dial failed', /ACL.*golink server.*port 80.*443/],
   ['timeout', 'deadline exceeded', /timed out/i],
   ['http', 'permission denied by golink', /HTTP.*permission denied by golink/],
 ]) {

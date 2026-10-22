@@ -2,13 +2,28 @@ export function inputPath(text) {
   return text.trim().replace(/^(?:go\/|\/)/, '');
 }
 
-export function originalURLPath(url) {
+// The redirect rule captures the whole navigation URL. golink never sees the
+// fragment, so it is split off here and reapplied to the destination.
+function splitCapturedURL(url) {
   const prefix = 'http://go/';
-  if (!url.startsWith(prefix) || url.includes('#')) {
-    throw new TypeError('Expected an http://go/ URL without a fragment');
-  }
+  if (!url.startsWith(prefix)) throw new TypeError('Expected an http://go/ URL');
+  const hash = url.indexOf('#');
+  return hash < 0 ? [url, null] : [url.slice(0, hash), url.slice(hash + 1)];
+}
+
+export function originalURLPath(url) {
   // URL parsing would normalize the path or re-encode characters. Keep the suffix raw.
-  return url.slice(prefix.length);
+  return splitCapturedURL(url)[0].slice('http://go/'.length);
+}
+
+// Returns the captured fragment without '#', or null if there was none.
+export function capturedFragment(url) {
+  return splitCapturedURL(url)[1];
+}
+
+// A redirect without its own fragment inherits the request's, as in browsers.
+export function withFragment(url, fragment) {
+  return fragment === null || url.includes('#') ? url : `${url}#${fragment}`;
 }
 
 export function escapeXML(text) {
