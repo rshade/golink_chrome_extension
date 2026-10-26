@@ -1,7 +1,7 @@
 # golink Chrome extension (Tailscale WASM): design
 
-Date: 2026-10-21
-Status: approved in brainstorming; pending written-spec review
+Date: 2026-10-21 (reconciled with the implementation 2026-10-26)
+Status: implemented; manual tailnet acceptance not yet run
 
 ## Purpose
 
@@ -61,6 +61,19 @@ the time:
   `Sec-Golink` header is present; browser JS can't set it, but Go writing raw
   HTTP over netstack can. `/.export` streams all links as JSON lines. There is
   no JSON search endpoint.
+- golink stops its create form from overwriting an existing link by scoping
+  the XSRF token to the placeholder name `.new`. `Sec-Golink` skips the XSRF
+  check entirely, so an API save silently overwrites. **Decision:** `Save`
+  checks `/.detail/{name}` first and returns kind `exists` unless the caller
+  passes `overwrite`.
+- In HTTPS mode golink's port 80 runs `RedirectHandler`, which answers every
+  request with a `302` to the same path on its HTTPS MagicDNS name. That
+  handler sits outside `Handler()`, so its responses lack the
+  `Referrer-Policy` header every link redirect carries. The client uses this
+  difference to tell an HTTPS upgrade from a link.
+- A link whose target is another go link (`/other` or `http://go/other`)
+  produces a redirect back to golink. golink's own `resolveLink` follows
+  these, so the extension does too.
 
 ## Architecture
 
@@ -69,22 +82,31 @@ pinned to `tailscale.com v1.104.2` (the version golink uses at `8b59870`).
 
 ```
 README.md            setup, ACL snippet, login identity, limitations, manual E2E checklist
-build.sh             GOOS=js GOARCH=wasm go build → ext/main.wasm;
+THIRD_PARTY_NOTICES.md  attribution and BSD license for the copied tsconnect code
+build.sh             GOOS=js GOARCH=wasm go build → ext/main.wasm with upstream
+                     tsconnect's feature tags (scripts/wasmtags);
                      copies $(go env GOROOT)/lib/wasm/wasm_exec.js → ext/
 go.mod / go.sum      module golink-chrome-extension (no host prefix; rename when published)
+package.json         "type": "module" and `node --test`; no npm dependencies
 golinkclient/        plain Go, no build tags, testable on Linux
   client.go          Client{HTTP *http.Client, Host string}
                      Resolve(ctx, path) (Result, error)
-                     Save(ctx, short, long) error
+                     Lookup(ctx, short) (*Link, error)
+                     Save(ctx, short, long, overwrite) error
                      Links(ctx) ([]Link, error)
+                     Ping(ctx) bool
   client_test.go
 wasm/                //go:build js
   main_js.go         registers globalThis.golinkExt
   node_js.go         setup copied from tailscale.com@v1.104.2
-                     cmd/tsconnect/wasm/wasm_js.go (attributed, SSH removed),
-                     and the JS-backed in-memory state store
+                     cmd/tsconnect/wasm/wasm_js.go (attributed, SSH removed)
+  state_js.go        synchronous in-memory ipn.StateStore that reports writes
   bridge_js.go       JS ⇄ Go promise helpers; passes the tailnet *http.Client
                      into golinkclient
+scripts/
+  wasmtags/          prints upstream tsconnect's build tags for build.sh
+  wasm-smoke.cjs     runs main.wasm under Node and checks the exported API
+tests/               node --test suites for every ext/ module
 ext/                 load unpacked
   manifest.json      MV3; omnibox keyword "go"; permissions: offscreen, storage,
                      tabs, declarativeNetRequestWithHostAccess;
@@ -92,7 +114,10 @@ ext/                 load unpacked
                      resource for the redirect rule; CSP extension_pages:
                      script-src 'self' 'wasm-unsafe-eval'
   background.js      service worker: omnibox, redirect-rule installation,
-                     offscreen lifecycle, storage, message routing
+                     page message routing, login tab, links cache, settings
+  lifecycle.js       offscreen document lifecycle: creation, hello handshake,
+                     epochs, crash limit, restart/logout/reset/auth key
+  state.js           serialized chrome.storage queue for tsState and settings
   lib.js             pure helpers (ES module) used by background.js; unit tested
   offscreen.html/js  hosts wasm_exec.js + main.wasm
   status.html/js/css popup UI, also opened as a full tab for pending/login/
@@ -111,10 +136,29 @@ All calls return Promises.
 | `start(config, callbacks)` | config: `golinkHost` (default `"go"`), `hostname`, `state` (object of key → base64 value), optional `authKey`, `controlURL`. callbacks: `onState(state)`, `onBrowseToURL(url)`, `onStateWrite(key, value)`, `onFatal(msg)`. Starts the node. |
 | `login()` | Starts an interactive login; the URL arrives via `onBrowseToURL`. |
 | `logout()` | Calls LocalBackend `Logout`. |
-| `status()` | `{state, loginName, tailnet, hostname, golinkReachable}`. `golinkReachable` comes from a `GET /` against golink with a 5 s timeout. |
-| `resolve(path)` | `path` includes the remainder and query, e.g. `"foo/bar?x=1"`. Returns `{redirect: url}`, `{notFound: true}`, `{golinkUI: path}`, or `{error: msg, kind: "unreachable" \| "http" \| "timeout"}`. |
-| `save(short, long)` | Returns `{ok: true}` or an error object as above. |
+| `status()` | `{state, loginName, tailnet, hostname, golinkReachable, backendError}`. `golinkReachable` comes from `Ping`, a `GET /.opensearch` with a 5 s timeout, only when `Running`. `backendError` is the backend's last error message, with any auth key redacted. |
+| `resolve(path)` | `path` includes the remainder and query, e.g. `"foo/bar?x=1"`. Returns `{redirect: url}`, `{notFound: true}`, `{golinkUI: path}`, or `{error: msg, kind}`. |
+| `save(short, long, overwrite)` | Returns `{ok: true}` or an error object. With `overwrite` false, an existing link gives kind `exists`. |
 | `links()` | Returns `[{short, long, owner}]`. |
+
+Calls made before `start` reject with "node is not started".
+
+### Error kinds
+
+| Kind | Origin | Meaning |
+|---|---|---|
+| `unreachable` | golinkclient | dial or transport failure reaching golink |
+| `timeout` | golinkclient | context deadline reaching golink |
+| `http` | golinkclient | unexpected golink response; message is golink's body |
+| `exists` | golinkclient | `save` without `overwrite` on an existing name |
+| `loop` | golinkclient, worker | more than 10 go-link-to-go-link hops |
+| `node-timeout` | lifecycle | the offscreen node didn't answer within 30 s |
+| `fatal` | lifecycle | the node crashed, or crashed twice within 60 s |
+| `authKey` | lifecycle | auth-key login rejected or timed out (20 s) |
+| `unauthorized` | worker, lifecycle | message from an unexpected sender or a framed page |
+| `stale`, `lifecycle` | lifecycle | message from a replaced document or epoch; internal failure |
+| `url` | worker | redirect target or control URL isn't an http/https URL |
+| `request` | worker | malformed page request or invalid `golinkHost` setting |
 
 ### `golinkclient.Resolve` classification
 
@@ -122,16 +166,26 @@ The HTTP client sets `CheckRedirect` to return `http.ErrUseLastResponse`.
 
 | Response | Result |
 |---|---|
-| 302 with an absolute `Location` | `Redirect(url)`, the exact `Location` string, unmodified |
-| 302 with `Location` starting with `/` | `GolinkUI(path)` |
+| 302 with an absolute http/https `Location` | `Redirect(url)`, the exact `Location` string, unmodified |
+| 302 with `Location` starting with `/.` | `GolinkUI(path)`, e.g. `/.detail/foo` for `foo+` |
+| 302 with any other `Location` starting with `/` | an alias to another go link; resolved again, up to 10 hops, then kind `loop` |
+| 302 with a missing or malformed `Location` | error, kind `http` |
+| 2xx | `GolinkUI("/" + path)`: golink rendered one of its own pages, e.g. home for `""` |
 | 404 | `NotFound` |
 | other non-2xx | error, kind `http`, with the response body (trimmed) as the message |
 | dial failure | error, kind `unreachable` |
 | context deadline | error, kind `timeout` |
 
+Every request first goes to `http://<golinkHost>/`. If that answers with a
+`RedirectHandler`-style HTTPS upgrade (a 302 to `https://` on the same path and
+query, with no `Referrer-Policy`, to the same host or a name under it), the
+client switches to that HTTPS origin for the rest of its lifetime. TLS uses
+`tlsdial`'s baked-in roots, since the browser runtime has no system roots.
+
 `Save` posts `application/x-www-form-urlencoded` `short` and `long` to `/` with
-`Sec-Golink: 1`. `Links` parses the `/.export` JSON lines. Timeouts:
-`Resolve`/`Save` 10 s, `Links` 20 s.
+`Sec-Golink: 1`, after a `Lookup` unless `overwrite` is set. `Links` parses the
+`/.export` JSON lines. Timeouts: `Resolve` and `Save` (including its `Lookup`)
+10 s, `Links` 20 s.
 
 ## Runtime and data flow
 
@@ -151,7 +205,10 @@ Offscreen documents can only use `chrome.runtime`, not `chrome.storage`.
    `WORKERS`. Concurrent calls share one in-flight promise. The offscreen
    document registers its message listener before loading WASM and sends a
    `ready` message when `golinkExt` is available; `ensureOffscreen()` waits for
-   that handshake before sending `start` or other calls.
+   that handshake before sending `start` or other calls. It also polls a
+   `hello` RPC, which returns `{docId, ready, started, epoch}`, so a worker
+   that restarted while WASM compiled recovers a missed `ready` and reuses a
+   live, already-started document.
 2. On creation, the service worker reads `chrome.storage.local.tsState` and
    the persisted `hostname`. `tsState` is `{epoch, values}`, where `values` is
    the state map passed to the offscreen document for `golinkExt.start`.
@@ -168,8 +225,10 @@ Offscreen documents can only use `chrome.runtime`, not `chrome.storage`.
    successful login.
 4. `hostname` is generated once as `golink-ext-<6 hex>` and persisted.
 
-Storage keys: `tsState` (`{epoch, values}`), `hostname`, `linksCache`
-(`{fetchedAt, links}`). The epoch is initialized once and increments on logout,
+`chrome.storage.local` keys: `tsState` (`{epoch, values}`), `hostname`,
+`golinkHost`, `controlURL`, `linksCache` (`{fetchedAt, links}`).
+`chrome.storage.session` keys, which last until the browser exits:
+`golinkLoginTab`, `golinkFatalTimestamps`, `golinkOffscreenUsed`. The epoch is initialized once and increments on logout,
 device reset, or offscreen replacement. The new epoch is persisted in the same
 `tsState` write as the new values, before a replacement starts. Messages from
 an older document cannot restore its state.
@@ -192,16 +251,43 @@ Entry points:
 
 Flow:
 
-1. The status page shows "Connecting…" immediately and requests a resolve.
-   The service worker calls `ensureOffscreen()`, then reads the node state.
-2. Not `Running`: the page shows the login UI or waits for the node, then
-   retries automatically once `Running`.
-3. `Running`: call `resolve(path)`.
-   - `redirect`: `tabs.update(tabId, {url})`.
+1. The status page shows "Connecting…" immediately and polls `status` every
+   2 s. The service worker calls `ensureOffscreen()`, then reads the node
+   state.
+2. Not `Running`: the worker answers `{pending: true}`. The page shows the
+   login UI or waits for the node, then retries automatically once `Running`.
+3. `Running`: the worker calls `resolve(path)` and returns a `navigate` URL.
+   The status page navigates itself with `location.replace`, so it doesn't
+   stay in session history and Back doesn't resolve again.
+   - `redirect` to `http://go/…`: another go link; the worker resolves it
+     again, up to 10 hops, then kind `loop`.
+   - `redirect` elsewhere: must be http or https (else kind `url`). The page
+     reapplies the original fragment unless the target has its own, as
+     browsers do for redirects.
    - `notFound`: `status.html?create=<short>` (save form pre-filled).
    - `golinkUI`: `status.html?golinkUI=<path>`, which explains that golink's
-     web UI needs native Tailscale and shows the link from `linksCache`.
-   - `error`: `status.html?error=<kind>&msg=…`.
+     web UI needs native Tailscale and shows the link from `linksCache`,
+     matched case- and dash-insensitively as golink does.
+   - `error`: shown on the same page with **Try again** and **Reset device**.
+
+### Settings
+
+**Connection settings** in the status page sets `golinkHost` (host or
+host:port, normalized to the form Go's `net/url` accepts) and `controlURL`.
+Blank fields restore the defaults `go` and `https://controlplane.tailscale.com`.
+Saving restarts the node with its existing identity (epoch advanced, values
+kept) and clears `linksCache`. The redirect rule still only captures
+`http://go/*`, whatever `golinkHost` is.
+
+### Page sender validation
+
+The worker accepts page commands only from `status.html` in this extension,
+and only from the toolbar popup (no tab) or a top-level tab (`frameId` 0).
+`status.html` must be web accessible for the redirect rule, which lets any
+site frame it; a framed copy could otherwise be clickjacked into **Log out**,
+**Reset device**, or **Replace existing link**. A framed status page also shows
+a notice instead of its UI. Offscreen events are accepted only from
+`offscreen.html`, and offscreen RPCs only from `background.js`.
 
 ### Autocomplete
 
@@ -223,8 +309,12 @@ also works before the worker wakes up.
 ### Interactive login (default)
 
 Popup **Log in**, then `login()`, then `onBrowseToURL(url)`. The service worker
-opens the URL with `chrome.tabs.create` and records the tab ID. On `Running`,
-it closes that tab and resumes any pending resolve.
+opens the URL with `chrome.tabs.create` and records the tab ID in
+`chrome.storage.session`, reusing that tab for a later login URL. On `Running`,
+it closes that tab and the status page resumes any pending resolve. The tab
+only counts as the login tab while it still shows the control server's login
+pages, not its `/admin` console, so a tab the user has moved on in is never
+closed.
 
 ### Auth key (optional)
 
@@ -256,10 +346,11 @@ for a while.
   request.
 - **Go panic or WASM exit:** the offscreen document sends `{type: "fatal"}`.
   The service worker closes the document and recreates it on the next
-  request. After 2 fatals within 60 s, it stops retrying and shows
-  `status.html?error=fatal`.
+  request. After 2 fatals within 60 s (timestamps in
+  `chrome.storage.session`), every request fails with kind `fatal` and the
+  status page shows the error with **Reset device**, which clears the limit.
 - **golink unreachable:** message tells the user to check that ACLs allow this
-  device to reach `go:80`.
+  device to reach golink on TCP 80, and on 443 if golink serves HTTPS.
 - **HTTP errors:** golink's response body is shown.
 
 **Reset device** is a service worker operation, not a Go API call. It blocks
@@ -309,38 +400,60 @@ NewSQLiteDB(tmp), Dev: true})` serves `Handler()` through `httptest`.
 `github.com/tailscale/golink` is a test-only dependency, never imported by
 `wasm/`, so SQLite stays out of `main.wasm`.
 
-Cases:
+Cases against real golink:
 
 - An absolute redirect is returned unmodified.
 - A `{{.Path}}` template keeps the path and query exactly.
 - An unknown link gives `NotFound`.
 - `foo+` gives `GolinkUI("/.detail/foo")`.
+- Relative aliases are followed; a cycle gives kind `loop`.
 - `Save` succeeds without an XSRF token, which proves `Sec-Golink` was sent.
+- `Save` without `overwrite` refuses an existing name with kind `exists`,
+  including a different-case spelling.
 - `Links` parses the export of several links.
-- A stub 500 gives kind `http` with the body.
-- A slow stub handler gives kind `timeout`.
+
+Cases against stub handlers: HTTPS upgrade (and link redirects that must not
+be treated as one), redirects never followed, the raw request URI preserved,
+query bytes escaped, malformed `Location`, 500 gives kind `http` with a bounded
+body, slow handler gives kind `timeout`, transport errors give `unreachable`,
+malformed hosts and fragments rejected, response bodies closed.
+
+`GOOS=js GOARCH=wasm go test ./wasm` runs under Go's `go_js_wasm_exec`: the
+state store copies values and reports writes, invalid base64 is rejected, and a
+throwing JS callback reports exactly one fatal.
 
 ### JS (`node --test`, no npm dependencies)
 
-`ext/lib.js` functions and the state-operation queue with fake Chrome storage:
+`tests/` covers every `ext/` module with fake Chrome APIs:
 
-- parsing omnibox input or a URL into a path;
-- filtering and ranking suggestions;
-- serializing and acknowledging `stateWrite`s, including concurrent keys and
-  a late write after logout or reset;
-- the crash-loop limiter (2 within 60 s).
+- `lib.js`: parsing omnibox input or a URL into a path, fragments, filtering
+  and ranking suggestions, escaping, the crash-loop limiter (2 within 60 s);
+- `state.js`: serializing and acknowledging `stateWrite`s, including
+  concurrent keys and a late write after logout or reset;
+- `lifecycle.js`: the hello handshake, worker restart reusing a live document,
+  stale epochs, crashes and the crash limit, auth-key restarts, logout, reset;
+- `background.js`: omnibox, redirect rule repair, page sender validation
+  (including framed pages and the popup), login tab handling, links cache,
+  resolve hops;
+- `status.js`: pending, create, golinkUI, and direct-capture modes, polling,
+  actions, settings, and error display.
 
 ### WASM smoke test
 
-Run `main.wasm` under Node with `$(go env GOROOT)/lib/wasm/wasm_exec_node.js`
-and check that `golinkExt` has all seven functions. No network.
+`scripts/wasm-smoke.cjs` loads `ext/wasm_exec.js` into Node, runs `main.wasm`,
+checks that `golinkExt` has all seven functions, and checks that each call other
+than `start` returns a Promise that rejects with "node is not started". No
+network.
 
 ### CI (`.github/workflows/build.yml`)
 
-- push / PR: `go test ./...`, `GOOS=js GOARCH=wasm go build ./wasm`, the WASM
-  smoke test, and `node --test`.
-- weekly schedule: `go get tailscale.com@latest && go mod tidy`, then the same
-  steps. A failure means the copied setup code needs updating.
+- push / PR: `go test ./...`, the js/wasm Go tests, `./build.sh`, the WASM
+  smoke test, `node --test`, and a check that `go list -deps ./wasm` contains
+  neither golink nor `modernc.org/sqlite`.
+- weekly schedule (Monday 09:23 UTC): a matrix of the pinned dependencies and
+  `go get tailscale.com@latest && go mod tidy`, then the same steps. A
+  `latest` failure means the copied setup code needs updating; the job never
+  commits the bump.
 
 ### Manual end-to-end (README checklist; needs a real tailnet)
 
