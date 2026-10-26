@@ -167,6 +167,23 @@ test('page routing rejects foreign senders, offscreen pages, start, persistence,
   assert.equal(f.calls.length, 0);
 });
 
+// status.html is web accessible for the redirect rule, so any site can frame it.
+test('page routing rejects a status page framed inside another page', async () => {
+  const f = fixture();
+  const framed = { ...f.sender, frameId: 3 };
+  for (const [method, args] of [['status', []], ['logout', []], ['reset', []], ['save', ['docs', 'https://example.com', true]]]) {
+    const reply = await f.background.handleMessage({ channel: 'golink', target: 'worker', method, args }, framed);
+    assert.equal(reply.error.kind, 'unauthorized', method);
+  }
+  assert.equal(f.calls.length, 0);
+});
+
+test('page routing accepts the toolbar popup, which has no tab or frame ID', async () => {
+  const f = fixture();
+  const popup = { id: 'extension', url: 'chrome-extension://extension/status.html' };
+  assert.equal((await f.background.handleMessage({ channel: 'golink', target: 'worker', method: 'status', args: [] }, popup)).ok, true);
+});
+
 test('runtime listener keeps the response channel open for async page replies', async () => {
   const f = fixture({ node: { status: () => ({ state: 'NeedsLogin' }) } });
   f.background.register();

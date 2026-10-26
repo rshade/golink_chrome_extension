@@ -188,6 +188,9 @@ export function createBackground({ chrome, lifecycle, store, now = Date.now }) {
     url.search = '';
     url.hash = '';
     if (sender?.id !== chrome.runtime.id || url.href !== statusURL) throw fault('Invalid extension page sender', 'unauthorized');
+    // status.html is web accessible for the redirect rule, so any site can
+    // frame it. Only the popup (no tab) and top-level tabs may issue commands.
+    if (sender.tab && sender.frameId !== 0) throw fault('Extension page must not be framed', 'unauthorized');
   }
   function validateArgs(method, args) {
     if (!Array.isArray(args)) throw fault('Arguments must be an array');

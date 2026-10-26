@@ -242,7 +242,13 @@ export function createDOMView(document) {
   };
 }
 
-if (globalThis.document && globalThis.chrome?.runtime) {
+// A framed copy cannot issue commands (the worker rejects it), so say why
+// instead of polling into errors.
+if (globalThis.document && globalThis.chrome?.runtime && globalThis.top !== globalThis) {
+  document.getElementById('main').replaceChildren(Object.assign(document.createElement('p'), {
+    textContent: 'This page cannot be embedded in another site.',
+  }));
+} else if (globalThis.document && globalThis.chrome?.runtime) {
   const controller = createStatusController({
     rpc: async (method, args) => {
       const reply = await chrome.runtime.sendMessage({ channel: 'golink', target: 'worker', method, args });
