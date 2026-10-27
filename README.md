@@ -91,6 +91,8 @@ The temporary Node 18 CDP helper emitted an experimental Undici WebSocket warnin
 
 ## Manual tailnet acceptance
 
+For a step-by-step run with test links, a policy file, and exact expected results, build a test bundle with `scripts/test-bundle.sh` and follow [docs/testing-on-a-test-tailnet.md](docs/testing-on-a-test-tailnet.md). The bundle contains the built extension and pinned golink server binaries, so the test machine needs only Chrome. The table below summarizes the same checks.
+
 Run the following on a test tailnet whose golink server you can edit for fixtures. Record the date, Chrome version, OS, and which golink hostname worked beside the completed results. Never put auth keys in this record. The results below remain `not run` because they require additional observed acceptance; automated controller tests and the headless checks above do not substitute for them.
 
 | Check | Procedure | Expected result | Result |

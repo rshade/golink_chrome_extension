@@ -1,0 +1,28 @@
+// Policy additions for a throwaway test tailnet. Merge these sections into
+// the tailnet's existing policy (Access controls → JSON editor); don't replace
+// the whole file unless the tailnet is used for nothing else.
+{
+	"tagOwners": {
+		// The golink server.
+		"tag:golink": ["autogroup:admin"],
+		// The extension, when it joins with an auth key.
+		"tag:golink-ext": ["autogroup:admin"],
+	},
+
+	"grants": [
+		// Interactive logins: any member can reach golink. golink serves
+		// HTTPS on 443 and redirects port 80 to it when HTTPS certificates
+		// are enabled for the tailnet.
+		{
+			"src": ["autogroup:member"],
+			"dst": ["tag:golink"],
+			"ip":  ["tcp:80", "tcp:443"],
+		},
+		// Auth-key logins. Remove this grant for the ACL-failure check (G1).
+		{
+			"src": ["tag:golink-ext"],
+			"dst": ["tag:golink"],
+			"ip":  ["tcp:80", "tcp:443"],
+		},
+	],
+}

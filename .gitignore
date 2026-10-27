@@ -1,3 +1,4 @@
 /ext/main.wasm
 /ext/wasm_exec.js
 /wasm-bin
+/dist

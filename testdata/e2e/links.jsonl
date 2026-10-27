@@ -1,0 +1,10 @@
+{"Short":"ext-simple","Long":"https://example.com/","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
+{"Short":"ext-search","Long":"https://duckduckgo.com/?q={{QueryEscape .Path}}","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
+{"Short":"ext-user","Long":"https://example.com/u/{{.User}}","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
+{"Short":"ext-alias","Long":"/ext-simple","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
+{"Short":"ext-alias-abs","Long":"http://go/ext-simple","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
+{"Short":"ext-loop-a","Long":"/ext-loop-b","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
+{"Short":"ext-loop-b","Long":"/ext-loop-a","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
+{"Short":"ext-page","Long":"https://example.com/page","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
+{"Short":"ext-replace","Long":"https://example.com/old","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
+{"Short":"Ext-Mixed-Case","Long":"https://example.com/mixed","Created":"2026-10-27T00:00:00Z","LastEdit":"2026-10-27T00:00:00Z","Owner":""}
