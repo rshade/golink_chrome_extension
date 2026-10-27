@@ -1,10 +1,25 @@
 # Testing the extension on a test tailnet
 
-This is the README of the test bundle built by `scripts/test-bundle.sh`. It
-walks through installing the extension on a machine with desktop Chrome,
-running a throwaway golink server on a test tailnet, and checking every
-behavior the design spec promises. Paths below are relative to the unpacked
-bundle.
+This guide walks through installing the extension on a machine with desktop
+Chrome, running a throwaway golink server on a test tailnet, and checking
+every behavior the design spec promises.
+
+`scripts/test-bundle.sh` produces two archives in `dist/`:
+
+- **`golink_chrome_extension-<commit>-full.tar.gz`**: the whole repository,
+  with Git history, the built extension in `ext/`, and the test bundle below
+  in `dist/`. Use this one to fix problems as you find them (see section 8).
+- **`golink-ext-test-<commit>.tar.gz`**: only what testing needs. This guide
+  is its `README.md`.
+
+Paths below are relative to the test bundle. In the full repository they
+are:
+
+| Test bundle | Full repository |
+|---|---|
+| `extension/` | `ext/` (load this one, so rebuilds take effect) |
+| `golink/` | `dist/golink-ext-test-<commit>/golink/` |
+| `fixtures/` | `testdata/e2e/` |
 
 ```
 extension/        the built extension; load this directory unpacked
@@ -93,7 +108,8 @@ google-chrome --user-data-dir="$HOME/golink-ext-profile"
 ```
 
 In that window: open `chrome://extensions`, turn on **Developer mode**,
-choose **Load unpacked**, and select the bundle's `extension/` directory. Pin
+choose **Load unpacked**, and select the bundle's `extension/` directory (in
+the full repository, `ext/`). Pin
 **Golink over Tailscale** to the toolbar. Note the extension ID shown on its
 card; I1 needs it.
 
@@ -229,3 +245,21 @@ Never paste auth keys into results.
 - Stop golink; delete `golink.db` and `golink-state/`.
 - Admin console: delete the `golink-ext-` and `go` devices and revoke unused
   auth keys.
+
+## 8. Making changes (full repository)
+
+Fixing problems on the test machine needs Go (any version from 1.21 on
+fetches the 1.27.3 toolchain that `go.mod` asks for) and Node.js 22, plus
+network access for Go modules. `CLAUDE.md` at the repository root has the
+commands and layout for Claude Code.
+
+After a change:
+
+1. **Go changes** (`golinkclient/`, `wasm/`): run `./build.sh`.
+   **JS, HTML, CSS, or manifest changes** in `ext/`: no build needed.
+2. `chrome://extensions` → the extension's reload button. Reloading closes the
+   node, so the next request starts it again. Its identity is kept, so no new
+   login.
+3. Rerun the failed check, then the checks in the same section.
+4. Run the automated tests (see `CLAUDE.md`) and commit. To take the fixed
+   code back to another machine, rerun `scripts/test-bundle.sh` or use Git.

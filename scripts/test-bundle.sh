@@ -1,7 +1,10 @@
 #!/bin/sh
-# Builds dist/golink-ext-test-<commit>.tar.gz: the built extension, pinned
-# golink server binaries, test fixtures, and docs/testing-on-a-test-tailnet.md
-# as its README, for testing on another machine.
+# Builds two archives in dist/ for testing on another machine:
+#   golink-ext-test-<commit>.tar.gz: the built extension, pinned golink server
+#     binaries, test fixtures, and docs/testing-on-a-test-tailnet.md as README.
+#   <repo>-<commit>-full.tar.gz: the whole repository with Git history, the
+#     built ext/, and the test bundle, so problems can be fixed on that machine.
+# dist/ holds only this script's output and is emptied first.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -13,7 +16,7 @@ fi
 rev=$(git rev-parse --short HEAD)
 name=golink-ext-test-$rev
 out=dist/$name
-rm -rf "$out" "dist/$name.tar.gz"
+rm -rf dist
 mkdir -p "$out/golink" "$out/fixtures"
 
 ./build.sh
@@ -41,4 +44,11 @@ built: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 (cd "$out" && find . -type f ! -name SHA256SUMS | sort | xargs sha256sum >SHA256SUMS)
 tar -C dist -czf "dist/$name.tar.gz" "$name"
+
+# Archive the repository from one level up so it unpacks under its own name.
+# The test bundle's own archive is already inside dist/$name, unpacked.
+repo=$(basename "$PWD")
+full=$repo-$rev-full.tar.gz
+tar -C .. --exclude="$repo/dist/*.tar.gz" -czf "dist/$full" "$repo"
 echo "dist/$name.tar.gz"
+echo "dist/$full"
