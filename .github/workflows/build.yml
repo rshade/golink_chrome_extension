@@ -26,6 +26,8 @@ jobs:
       - run: mise run browser-setup
       - name: Install Chromium system libraries
         run: npx playwright-core install-deps chromium
+      - name: Allow the install test's private namespace
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: mise run ci
       - name: Test bundle builds
         if: matrix.deps == 'pinned'

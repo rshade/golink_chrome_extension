@@ -1,0 +1,69 @@
+name: release
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  checks:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+      - run: mise run browser-setup
+      - name: Install Chromium system libraries
+        run: npx playwright-core install-deps chromium
+      - name: Allow the install test's private namespace
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: mise run ci
+
+  package:
+    needs: [release-please, checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release-signing
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+      - name: Pack and sign
+        env:
+          EXTENSION_SIGNING_KEY: ${{ secrets.EXTENSION_SIGNING_KEY }}
+          RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
+          RELEASE_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          umask 077
+          RELEASE_KEY_FILE="$(mktemp "$RUNNER_TEMP/signing-key.XXXXXX")"
+          export RELEASE_KEY_FILE
+          trap 'shred -u "$RELEASE_KEY_FILE" 2>/dev/null || rm -f "$RELEASE_KEY_FILE"' EXIT
+          printf '%s\n' "$EXTENSION_SIGNING_KEY" > "$RELEASE_KEY_FILE"
+          mise run package
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "$TAG" dist/release/* --clobber

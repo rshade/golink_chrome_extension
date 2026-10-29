@@ -42,10 +42,20 @@ description = "Drive the extension against a golink on a real tailnet (needs GOL
 depends = ["build"]
 run = "node scripts/browser-e2e.cjs"
 
+[tasks.test-install]
+description = "Force-install a signed CRX by policy in Chrome for Testing, then update it (private mount namespace)"
+depends = ["build"]
+run = "scripts/check-install.sh"
+
+[tasks.package]
+description = "Build, then pack a signed CRX and zip into dist/release (needs RELEASE_KEY_FILE)"
+depends = ["build"]
+run = "scripts/package-release.sh"
+
 [tasks.test-bundle]
 description = "Write the portable test bundle to dist/ (needs a clean tree)"
 run = "scripts/test-bundle.sh"
 
 [tasks.ci]
 description = "Everything CI runs, except the test bundle"
-depends = ["test-go", "test-wasm", "smoke", "test-js", "check-deps", "test-browser"]
+depends = ["test-go", "test-wasm", "smoke", "test-js", "check-deps", "test-browser", "test-install"]

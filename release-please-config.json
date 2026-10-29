@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "golink-chrome-extension",
+      "bump-minor-pre-major": true,
+      "include-component-in-tag": false,
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "ext/manifest.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  }
+}
