@@ -11,7 +11,7 @@ Chrome SHALL be able to install the extension without user action when an admini
 
 #### Scenario: Managed device installs the extension
 - **WHEN** a managed Chrome receives the documented policy
-- **THEN** the extension appears installed and enabled with the key-derived ID, and the user cannot remove it
+- **THEN** the extension appears installed and enabled with the key-derived ID, with Chrome reporting it as installed by policy
 
 #### Scenario: Update through the update XML
 - **WHEN** a newer release is published and Chrome next checks for updates

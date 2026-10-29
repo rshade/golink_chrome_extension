@@ -38,7 +38,8 @@ below.
 
 ## Policy
 
-All platforms use the `ExtensionSettings` policy with this value:
+All platforms use the `ExtensionSettings` policy with this value. The
+platform sections below say which parts were tested:
 
 ```json
 {
@@ -92,6 +93,14 @@ Open `chrome://extensions` and look for "Golink over Tailscale" marked as
 installed by your organization. `chrome://policy` shows whether the policy was
 read, and `chrome://extensions-internals` lists the ID, version, and install
 location.
+
+### Debugging a managed install
+
+By default Chrome blocks DevTools on extensions installed by policy, so you
+cannot inspect the service worker or open its pages through the DevTools
+protocol, and browser automation sees the tab close. This does not affect
+normal use. To debug, set the `DeveloperToolsAvailability` policy to `1` on
+that machine.
 
 ## Load unpacked (fallback)
 

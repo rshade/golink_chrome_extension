@@ -23,6 +23,7 @@ node scripts/wasm-smoke.cjs   # after build.sh: exported Go API, no network
 mise run test-browser         # real Chromium loads ext/; needs `mise run browser-setup`
 mise run test-e2e             # real tailnet; see "Real tailnet run" below
 mise run test-install         # force-install by policy, then update
+mise run test-release         # published release in Google Chrome + real tailnet
 mise run package              # signed release assets; needs RELEASE_KEY_FILE
 scripts/test-bundle.sh        # needs a clean tree; writes dist/
 ```
@@ -73,6 +74,17 @@ policy snippets are in `docs/deploying.md`. Facts that cost time:
   must be ignored for force-install. Headless Chrome closes tabs on
   `chrome-extension://` URLs, so read `chrome://extensions-internals` instead.
 - Node's test runner auto-runs `*-test.cjs`; name scripts `check-*`.
+- Chrome blocks DevTools on force-installed extensions by default, so
+  Playwright sees their tabs close and never sees their service worker. The
+  release check sets `DeveloperToolsAvailability: 1` in its policy file.
+- `mise run test-release` installs the published release by policy into Google
+  Chrome (`/etc/opt/chrome`) from the manifest's real `update_url`, then runs
+  the `browser-e2e.cjs` checks. It needs `GOLINK_E2E_AUTHKEY` and a golink on
+  the tailnet, and refuses to run outside `scripts/check-release.sh`.
+- Run golink for e2e from `ghcr.io/tailscale/golink:main` with `--user $(id -u)`
+  and a bind-mounted dir. golink logs `Serving http://go/ ...` when ready; it
+  does not log `state is Running`. A node that registers while an offline
+  `go` still exists becomes `go-1`, and bare `go` then fails to resolve.
 - Third-party actions in `release.yml` are pinned to commit SHAs.
 
 ## Layout

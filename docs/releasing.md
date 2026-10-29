@@ -12,11 +12,15 @@ extension. The extension is not published to the Chrome Web Store; see
 2. `.github/workflows/release.yml` keeps a release PR open. It bumps
    `ext/manifest.json` and `.release-please-manifest.json` and writes
    `CHANGELOG.md`.
-3. Merging the release PR creates the tag (`vX.Y.Z`) and the GitHub Release.
+3. Merging the release PR creates the tag (`vX.Y.Z`) and a draft GitHub
+   Release. A draft is invisible to `releases/latest`, so installed
+   extensions never see a release that has no assets yet.
 4. The same workflow then runs the `checks` job (`mise run ci`, no secrets) on
    the tagged commit, and then the `package` job.
 5. The `package` job waits for approval in the `release-signing` environment.
-   After you approve it, it builds, signs, and uploads the assets.
+   After you approve it, it builds, signs, uploads the assets, and then
+   publishes the draft. If checks or packing fail, the release stays a draft;
+   fix the cause and rerun the failed jobs.
 
 Everything lives in one workflow because tags and PRs created with the default
 `GITHUB_TOKEN` do not trigger other workflows.
