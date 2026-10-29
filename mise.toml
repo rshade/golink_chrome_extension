@@ -1,6 +1,7 @@
 [tools]
 go = "1.27.3"
 node = "26"
+"npm:@fission-ai/openspec" = "1.15.0"
 
 [tasks.build]
 description = "Build ext/main.wasm and ext/wasm_exec.js"

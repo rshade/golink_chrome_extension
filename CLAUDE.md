@@ -75,6 +75,13 @@ Go changes need `./build.sh`; `ext/` JS/HTML/CSS changes don't. Then reload the
 extension on `chrome://extensions` (the unpacked `ext/` directory). The node
 restarts and keeps its identity. Rerun the affected check from the testing doc.
 
+## Planning changes
+
+OpenSpec is pinned in `mise.toml` (`mise install`). Start a change with
+`/opsx:propose "idea"`; proposals live in `openspec/changes/`. Project rules
+for proposals are in `openspec/config.yaml`. The existing design spec stays in
+`docs/superpowers/specs/` and has not been migrated into `openspec/specs/`.
+
 ## Conventions
 
 - Write a failing test first, then the fix.

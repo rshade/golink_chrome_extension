@@ -1,0 +1,34 @@
+schema: spec-driven
+
+context: |
+  This is a reference example, so changes must stay readable.
+  Tasks write a failing test first, then the fix.
+  Auth keys are never logged, stored, or rendered.
+  Status-page commands must come from the popup or a top-level tab, because
+  status.html is web accessible and the worker rejects framed senders.
+  Behavior that only shows up on a real tailnet (TLS, ACLs, identity) needs a
+  check in scripts/browser-e2e.cjs or docs/testing-on-a-test-tailnet.md.
+  The design spec docs/superpowers/specs/2026-10-21-golink-chrome-extension-design.md
+  describes the code as built; a change that alters behavior updates it.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
