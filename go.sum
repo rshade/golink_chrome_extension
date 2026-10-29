@@ -188,6 +188,8 @@ github.com/tailscale/golang-x-crypto v0.0.0-20260720160339-c86ca1284b96 h1:m9EAs
 github.com/tailscale/golang-x-crypto v0.0.0-20260720160339-c86ca1284b96/go.mod h1:NC3xRCu4UR+m4n6ix8b6oLLbHa820Y0StbOQEdWTDo0=
 github.com/tailscale/golink v1.0.1-0.20261021144816-8b59870a054f h1:3q9mbxbOWvyDAwFXkXT5okH4xatC4IAhOMc7PO3RVdw=
 github.com/tailscale/golink v1.0.1-0.20261021144816-8b59870a054f/go.mod h1:Rf5LIILBFiCfU6djrrahcNjwLQ77Q0Cw71IRd6CcWMw=
+github.com/tailscale/golink v1.0.1-0.20261027153909-d02fb073fd1c h1:Ic7sIHl62qppmRLSIs3aw956PzTi0RySZgNOU6cT3AA=
+github.com/tailscale/golink v1.0.1-0.20261027153909-d02fb073fd1c/go.mod h1:Rf5LIILBFiCfU6djrrahcNjwLQ77Q0Cw71IRd6CcWMw=
 github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f h1:9hiVElpCmKzsBKQHkBqZ8LGzt82iLfM8egxr4sew+Ys=
 github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f/go.mod h1:8/zr1Tv0+cKpVtGCEB/7YfRXr2TszsMxMXLaT8YuBgU=
 github.com/tailscale/netlink v1.1.1-0.20240822203006-4d49adab4de7 h1:uFsXVBE9Qr4ZoF094vE6iYTLDl0qCiKzYXlL6UeWObU=
