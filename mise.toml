@@ -1,6 +1,6 @@
 [tools]
 go = "1.27.3"
-node = "24"
+node = "26"
 
 [tasks.build]
 description = "Build ext/main.wasm and ext/wasm_exec.js"
