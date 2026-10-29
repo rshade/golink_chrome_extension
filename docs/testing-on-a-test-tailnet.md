@@ -249,7 +249,7 @@ Never paste auth keys into results.
 ## 8. Making changes (full repository)
 
 Fixing problems on the test machine needs Go (any version from 1.21 on
-fetches the 1.27.3 toolchain that `go.mod` asks for) and Node.js 24, plus
+fetches the 1.27.3 toolchain that `go.mod` asks for) and Node.js 26, plus
 network access for Go modules. `CLAUDE.md` at the repository root has the
 commands and layout for Claude Code.
 

@@ -4,7 +4,7 @@ A Chrome extension that embeds a Tailscale node in WebAssembly to resolve and sa
 
 ## Build and load
 
-Use Linux or another environment supported by Go, Go 1.27.3 as specified in `go.mod`, Node.js 24, and Chrome 116 or later. Chrome 156 was used for the browser checks below. The extension has no runtime npm dependencies; `playwright-core` is a dev dependency of `scripts/browser-smoke.cjs`. [mise](https://mise.jdx.dev) pins Go and Node: `mise install`, then `mise run ci`.
+Use Linux or another environment supported by Go, Go 1.27.3 as specified in `go.mod`, Node.js 26, and Chrome 116 or later. Chrome 156 was used for the browser checks below. The extension has no runtime npm dependencies; `playwright-core` is a dev dependency of `scripts/browser-smoke.cjs`. [mise](https://mise.jdx.dev) pins Go and Node: `mise install`, then `mise run ci`.
 
 From the repository root:
 
@@ -61,7 +61,7 @@ Auth keys pass through memory for registration. The extension clears the input o
 - A destination available only inside the tailnet still requires native Tailscale to load in a normal browser tab. Golink's browse, edit, and delete web UI also requires native Tailscale. The extension provides resolve, save, and cached suggestions.
 - Browser navigation accepts HTTP and HTTPS targets. The Go client preserves redirect `Location` values and path/query escaping, but other destination schemes are rejected at the navigation boundary.
 - After two fatal node exits within 60 seconds, automatic recovery stops. Use **Reset device** to permit immediate recovery or retry after the window expires.
-- `tailscale.com` is pinned to `v1.104.2`. It predates upstream fix [`0f3c767d1`](https://github.com/tailscale/tailscale/commit/0f3c767d1) for devices deleted from the admin console. A deleted or cleaned-up ephemeral device can still appear `Running` while golink is unreachable. Use **Reset device** to return to `NeedsLogin`, then register again.
+- `tailscale.com` is pinned to `v1.104.4`. It still predates upstream fix [`0f3c767d1`](https://github.com/tailscale/tailscale/commit/0f3c767d1) for devices deleted from the admin console. A deleted or cleaned-up ephemeral device can still appear `Running` while golink is unreachable. Use **Reset device** to return to `NeedsLogin`, then register again.
 - Bare `go` resolution inside the node and scheme-less `go/<name>` navigation remain pending real tailnet/browser checks. Configure the full MagicDNS name and use an explicit `http://go/<name>` URL when needed.
 - This repository supports loading an unpacked extension. It has no Chrome Web Store publishing pipeline.
 
@@ -69,7 +69,7 @@ The node setup and Promise helpers adapt `cmd/tsconnect/wasm/wasm_js.go` from th
 
 ## CI
 
-[build.yml](.github/workflows/build.yml) runs Go tests, the js/wasm Go tests in `wasm/`, the WASM build and smoke test, Node tests, and a WASM dependency check on pushes and pull requests. It installs Go and Node 24 through mise and runs `mise run ci`, which also loads the extension into headless Chromium. Monday at 09:23 UTC, the scheduled matrix checks both pinned dependencies and `tailscale.com@latest` with `go mod tidy`. Both modes run the same checks. The latest mode changes only its job checkout and does not commit dependency updates. Manual dispatch checks the pinned dependencies.
+[build.yml](.github/workflows/build.yml) runs Go tests, the js/wasm Go tests in `wasm/`, the WASM build and smoke test, Node tests, and a WASM dependency check on pushes and pull requests. It installs Go and Node 26 through mise and runs `mise run ci`, which also loads the extension into headless Chromium. Monday at 09:23 UTC, the scheduled matrix checks both pinned dependencies and `tailscale.com@latest` with `go mod tidy`. Both modes run the same checks. The latest mode changes only its job checkout and does not commit dependency updates. Manual dispatch checks the pinned dependencies.
 
 The schedule starts only after the workflow exists on the default branch. Enable GitHub Actions failure notifications for this repository in your GitHub notification settings and inspect the Actions tab after scheduled runs. Check that schedules remain enabled, especially after repository inactivity. A latest failure calls for reviewing upstream internals and the copied setup code; it does not automatically update the pin. Review action versions when updating this workflow, and use full action SHAs if repository policy requires them. Local checks do not establish that GitHub CI or the latest-dependency job has run.
 
