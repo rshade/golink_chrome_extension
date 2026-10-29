@@ -1,0 +1,45 @@
+[tools]
+go = "1.27.3"
+node = "22"
+
+[tasks.build]
+description = "Build ext/main.wasm and ext/wasm_exec.js"
+run = "./build.sh"
+
+[tasks.test-go]
+description = "golinkclient tests against a real dev-mode golink"
+run = "go test ./..."
+
+[tasks.test-wasm]
+description = "js/wasm Go tests (state store and Promise bridge)"
+run = 'env -i HOME="$HOME" PATH="$PATH" GOOS=js GOARCH=wasm go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./wasm'
+
+[tasks.test-js]
+description = "Extension JavaScript tests with fake Chrome APIs"
+run = "node --test"
+
+[tasks.smoke]
+description = "Exported Go API of the built WASM, no network"
+depends = ["build"]
+run = "node scripts/wasm-smoke.cjs"
+
+[tasks.check-deps]
+description = "Fail if the WASM build pulls in golink or SQLite"
+run = "scripts/check-wasm-deps.sh"
+
+[tasks.browser-setup]
+description = "Install Playwright and its Chromium build"
+run = ["npm ci", "npx playwright-core install chromium"]
+
+[tasks.test-browser]
+description = "Load ext/ into real Chromium and check start-up, WASM node, status page"
+depends = ["build"]
+run = "node scripts/browser-smoke.cjs"
+
+[tasks.test-bundle]
+description = "Write the portable test bundle to dist/ (needs a clean tree)"
+run = "scripts/test-bundle.sh"
+
+[tasks.ci]
+description = "Everything CI runs, except the test bundle"
+depends = ["test-go", "test-wasm", "smoke", "test-js", "check-deps", "test-browser"]
