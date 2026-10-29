@@ -5,11 +5,36 @@
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkC+iZcDB6Rumc4j+Ocndzc4q9U5Iry5XdSqlq2OzoX/Z/DQ+qR1PTX7VyFjrab0qwM3ttPXyGzz8vB4U3b1epnCu/cm6npWQrslMW01tn9GVxtQds9uiXcpOyTeqbPn+8H8WaJIeo3vWRfO6TkxWgNskFsDZxfU+PTfeBgMqzN2d5j0EA+Lj9yopTbWPxY47hxR2Bp5IHn3ddJbE225IDQ0WGHrZP+jHLyiSTeqIzvdFIEzR/ckT7UWJ2f9GH51vh8p3UTjvGkS0IopJVAbvB6Bkojx3ozdcHe1chTSTgZjzp1TZty81IRtMy4EU4O8MiFRtl7cYnRkltGf7wrdxZQIDAQAB",
   "update_url": "https://github.com/rshade/golink_chrome_extension/releases/latest/download/update.xml",
   "minimum_chrome_version": "116",
-  "permissions": ["offscreen", "storage", "tabs", "declarativeNetRequestWithHostAccess"],
-  "host_permissions": ["http://go/*"],
-  "background": {"service_worker": "background.js", "type": "module"},
-  "action": {"default_popup": "status.html"},
-  "omnibox": {"keyword": "go"},
-  "web_accessible_resources": [{"resources": ["status.html"], "matches": ["<all_urls>"]}],
-  "content_security_policy": {"extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"}
+  "permissions": [
+    "offscreen",
+    "storage",
+    "tabs",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "http://go/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "status.html"
+  },
+  "omnibox": {
+    "keyword": "go"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "status.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
 }
