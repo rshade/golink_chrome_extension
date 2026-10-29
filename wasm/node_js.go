@@ -194,8 +194,8 @@ func newNode(config nodeConfig, callbacks *callbacks) (_ *node, err error) {
 		Transport: &http.Transport{
 			DialContext: dialer.UserDial,
 			Proxy:       nil,
-			// golink's HTTPS listener uses a Let's Encrypt certificate. The browser
-			// runtime has no system roots, so tlsdial falls back to baked-in roots.
+			// golink's HTTPS listener uses a Let's Encrypt certificate. js/wasm has no
+			// system roots, so tlsdial needs the baked-in roots, which wasmtags keeps.
 			TLSClientConfig: tlsdial.Config(sys.HealthTracker.Get(), nil),
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
