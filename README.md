@@ -2,6 +2,16 @@
 
 A Chrome extension that embeds a Tailscale node in WebAssembly to resolve and save links on an existing [golink server](https://github.com/tailscale/golink). The extension can reach that server without native Tailscale on the computer. Chrome still loads each resolved destination through its normal network connection.
 
+## Install a release
+
+Releases are on the
+[GitHub Releases](https://github.com/rshade/golink_chrome_extension/releases)
+page. The extension is not on the Chrome Web Store. Managed machines get it by
+`ExtensionSettings` policy, which also keeps it updated; anyone else can load
+the unpacked zip. See [docs/deploying.md](docs/deploying.md) for policy
+snippets, managed-device requirements per OS, and which snippets are tested.
+Maintainers: see [docs/releasing.md](docs/releasing.md).
+
 ## Build and load
 
 Use Linux or another environment supported by Go, Go 1.27.3 as specified in `go.mod`, Node.js 26, and Chrome 116 or later. Chrome 156 was used for the browser checks below. The extension has no runtime npm dependencies; `playwright-core` is a dev dependency of `scripts/browser-smoke.cjs`. [mise](https://mise.jdx.dev) pins Go and Node: `mise install`, then `mise run ci`.

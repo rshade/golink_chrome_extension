@@ -113,6 +113,11 @@ the full repository, `ext/`). Pin
 **Golink over Tailscale** to the toolbar. Note the extension ID shown on its
 card; I1 needs it.
 
+The manifest declares a `key`, so the extension ID is always
+`mdfffmleleklegallldnnbmbicdhflco`, whichever directory you load it from. A
+profile that loaded the extension before the key was added saw a different,
+path-derived ID; remove that copy, load the extension again, and log in again.
+
 **Logs**, if something goes wrong: on the extension's card, **service worker**
 opens the worker's DevTools, and **Inspect views: offscreen.html** (present
 once the node has started) opens the node's DevTools. Copy any red errors

@@ -22,6 +22,8 @@ node --test                   # tests/*.test.js, fake Chrome APIs, no npm deps
 node scripts/wasm-smoke.cjs   # after build.sh: exported Go API, no network
 mise run test-browser         # real Chromium loads ext/; needs `mise run browser-setup`
 mise run test-e2e             # real tailnet; see "Real tailnet run" below
+mise run test-install         # force-install by policy, then update
+mise run package              # signed release assets; needs RELEASE_KEY_FILE
 scripts/test-bundle.sh        # needs a clean tree; writes dist/
 ```
 
@@ -53,6 +55,25 @@ Hard-won facts:
   `env -i` for that reason.
 - Unknown links pass through `status.html#...` before `?create=...`; wait for
   the message text, not for the form to appear.
+
+## Releasing
+
+release-please opens release PRs from conventional commits; merging one tags,
+checks, and packs a signed CRX in the approval-gated `release-signing`
+environment. Setup and key handling are in `docs/releasing.md`; install and
+policy snippets are in `docs/deploying.md`. Facts that cost time:
+
+- The extension ID is fixed by the manifest `key` (`scripts/extension-id.cjs`);
+  `update_url` in the manifest cannot change once installed copies exist.
+- Chrome for Testing reads policy from `/etc/opt/chrome_for_testing/policies/managed`.
+  `check-install` runs in `unshare --user --map-root-user --mount` with a tmpfs
+  over `/etc/opt`, so the host is untouched; CI needs
+  `kernel.apparmor_restrict_unprivileged_userns=0`.
+- Playwright's default `--disable-extensions` and `--disable-background-networking`
+  must be ignored for force-install. Headless Chrome closes tabs on
+  `chrome-extension://` URLs, so read `chrome://extensions-internals` instead.
+- Node's test runner auto-runs `*-test.cjs`; name scripts `check-*`.
+- Third-party actions in `release.yml` are pinned to commit SHAs.
 
 ## Layout
 
