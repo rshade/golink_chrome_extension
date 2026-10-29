@@ -48,7 +48,7 @@
 ## 8. Rehearsal and first release
 
 - [ ] 8.1 Publish a throwaway prerelease and verify Chrome installs from, and updates against, the real GitHub URLs; if the redirect or content type fails, move only `update.xml` to GitHub Pages and re-verify before any distribution
-- [ ] 8.2 Decide the repository `LICENSE` with the maintainer and verify `LICENSE` exists and the notices reference it
+- [x] 8.2 Decide the repository `LICENSE` with the maintainer and verify `LICENSE` exists and the notices reference it
 - [ ] 8.3 Merge the first release PR, approve the signing job, and verify the Release holds all five assets and `sha256sum -c` passes on a fresh download
 - [ ] 8.4 File follow-up issues for Edge, Brave, and Firefox support, and verify they are linked from `docs/deploying.md`
 

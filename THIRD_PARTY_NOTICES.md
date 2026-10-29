@@ -1,5 +1,9 @@
 # Third-party notices
 
+This extension's own code is released under the BSD 3-Clause license in
+`LICENSE`, the same license Tailscale uses. The notices below cover code and
+modules from other projects.
+
 The Tailscale node setup, Promise helper, log policy, and logging transport in wasm/node_js.go and wasm/bridge_js.go are adapted from tailscale.com v1.104.2, cmd/tsconnect/wasm/wasm_js.go. SSH, terminal, peer presentation, hostname generation, upstream fetch, and upstream global APIs have been removed. State and the public API are adapted for this extension.
 
 Source: https://github.com/tailscale/tailscale/blob/v1.104.2/cmd/tsconnect/wasm/wasm_js.go
