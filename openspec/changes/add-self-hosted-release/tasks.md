@@ -30,7 +30,7 @@
 
 - [x] 5.1 Write a script that serves a built `update.xml` and CRX from localhost, writes a managed `ExtensionSettings` policy for the extension ID, starts Chrome with it, and asserts the extension loads with that ID; verify it passes locally on this machine's Chrome or Chromium
 - [x] 5.2 Extend it to publish a higher version and assert Chrome updates to it, and verify the version changes without user action
-- [ ] 5.3 Add `mise run test-install` and run it as a job in `build.yml`; verify the job passes on a pull request and that the policy file is written only inside the test's private mount namespace, never to the host's /etc
+- [x] 5.3 Add `mise run test-install` and run it as a job in `build.yml`; verify the job passes on a pull request and that the policy file is written only inside the test's private mount namespace, never to the host's /etc
 
 ## 6. Release automation
 
@@ -49,8 +49,8 @@
 
 - [ ] 8.1 Publish a throwaway prerelease and verify Chrome installs from, and updates against, the real GitHub URLs; if the redirect or content type fails, move only `update.xml` to GitHub Pages and re-verify before any distribution
 - [x] 8.2 Decide the repository `LICENSE` with the maintainer and verify `LICENSE` exists and the notices reference it
-- [ ] 8.3 Merge the first release PR, approve the signing job, and verify the Release holds all five assets and `sha256sum -c` passes on a fresh download
-- [ ] 8.4 File follow-up issues for Edge, Brave, and Firefox support, and verify they are linked from `docs/deploying.md`
+- [x] 8.3 Merge the first release PR, approve the signing job, and verify the Release holds all five assets and `sha256sum -c` passes on a fresh download
+- [x] 8.4 File follow-up issues for Edge, Brave, and Firefox support, and verify they are linked from `docs/deploying.md`
 
 ## Workflow follow-up
 

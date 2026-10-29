@@ -13,6 +13,13 @@ Each snippet below is labeled **tested** or **untested**. Tested means
 means it follows Chrome's documented policy format but nobody has run it on
 that platform.
 
+## Other browsers
+
+Only Chrome is supported. Work on the others is tracked in
+[Edge (#11)](https://github.com/rshade/golink_chrome_extension/issues/11),
+[Brave (#12)](https://github.com/rshade/golink_chrome_extension/issues/12), and
+[Firefox (#13)](https://github.com/rshade/golink_chrome_extension/issues/13).
+
 ## Managed devices
 
 Force-installing an extension from outside the Chrome Web Store is honored
@@ -55,8 +62,12 @@ Tested on Linux with Chrome for Testing 156, using a managed policy file.
 `/etc/opt/chrome_for_testing/policies/managed/`, force-installs a signed CRX,
 checks the loaded ID, publishes a newer version, and checks that Chrome
 updates. It points `update_url` at a local server instead of GitHub and sets
-`override_update_url` so the test URL wins over the manifest. The policy
-format and the signed CRX are what is tested, not the GitHub URL.
+`override_update_url` so the test URL wins over the manifest.
+
+The GitHub URL itself was checked once, by hand, against the v0.1.0 release:
+Chrome for Testing 156 force-installed the extension from the real
+`update_url` through GitHub's redirects. Updating from a later release against
+GitHub has not been checked yet.
 
 For Google Chrome, put the same JSON in
 `/etc/opt/chrome/policies/managed/golink.json`. For Chromium, use
