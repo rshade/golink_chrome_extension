@@ -17,7 +17,7 @@ jobs:
         deps: ${{ github.event_name == 'schedule' && fromJSON('["pinned","latest"]') || fromJSON('["pinned"]') }}
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@v5
       - if: matrix.deps == 'latest'
         name: Try latest Tailscale internals
         run: |
