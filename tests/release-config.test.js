@@ -25,3 +25,15 @@ test('the last released version is never ahead of the manifest version', () => {
 test('tags carry no component prefix, matching the update XML codebase URL', () => {
   assert.equal(config.packages['.']['include-component-in-tag'], false);
 });
+
+test('releases stay drafts, with their tag, until the signed assets are attached', () => {
+  const root = config.packages['.'];
+  assert.equal(root.draft, true);
+  assert.equal(root['force-tag-creation'], true);
+  const workflow = fs.readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const upload = workflow.indexOf('gh release upload');
+  const publish = workflow.indexOf('gh release edit');
+  assert.ok(upload > 0, 'the workflow uploads assets');
+  assert.ok(publish > upload, 'the draft is published only after the upload');
+  assert.match(workflow.slice(publish), /--draft=false/);
+});
