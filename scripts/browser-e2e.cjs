@@ -5,16 +5,26 @@
 //   GOLINK_E2E_AUTHKEY  tag:golink-ext auth key, pre-approved (required)
 // golink must be seeded with testdata/e2e/links.jsonl. Each run creates its
 // own links, so the same server can be reused.
+//
+// By default it loads ext/ unpacked. With GOLINK_E2E_INSTALLED=1 it instead
+// force-installs the published release by policy from the manifest's real
+// update_url into Google Chrome, as a managed device would; run that through
+// scripts/check-release.sh, which gives Chrome a private /etc.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright-core');
+const {extensionID} = require('./extension-id.cjs');
 
 const authKey = process.env.GOLINK_E2E_AUTHKEY;
 if (!authKey) { console.error('GOLINK_E2E_AUTHKEY is required'); process.exit(2); }
 
 const extPath = path.resolve('ext');
+const manifest = JSON.parse(fs.readFileSync(path.join(extPath, 'manifest.json'), 'utf8'));
+const extID = extensionID(manifest.key);
+const installed = process.env.GOLINK_E2E_INSTALLED === '1';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const suffix = Date.now().toString(36);
 const results = [];
 
@@ -33,16 +43,57 @@ function report(r) {
   console.log(`${r.ok ? 'PASS' : 'FAIL'} ${r.id.padEnd(4)} ${r.description}${r.ok ? '' : `\n         ${r.detail}`}`);
 }
 
+function launchOptions() {
+  if (!installed) {
+    return {channel: 'chromium', headless: true, args: [`--disable-extensions-except=${extPath}`, `--load-extension=${extPath}`]};
+  }
+  if (process.env.GOLINK_E2E_PRIVATE_ETC !== '1') {
+    throw new Error('installed mode writes a browser policy file; run it through scripts/check-release.sh');
+  }
+  const policyDir = '/etc/opt/chrome/policies/managed';
+  fs.mkdirSync(policyDir, {recursive: true});
+  // Chrome blocks DevTools, and so Playwright, on force-installed extensions by default and
+  // closes any tab that opens one of their pages. Real users are unaffected; this only lets the test in.
+  fs.writeFileSync(path.join(policyDir, 'golink-release.json'), JSON.stringify({
+    DeveloperToolsAvailability: 1,
+    ExtensionSettings: {[extID]: {installation_mode: 'force_installed', update_url: manifest.update_url}},
+  }));
+  return {
+    channel: 'chrome', headless: true, args: ['--no-sandbox'],
+    // Playwright's defaults turn off extensions and the background networking that installs them.
+    ignoreDefaultArgs: ['--disable-extensions', '--disable-background-networking'],
+  };
+}
+
+async function installedRecord(context) {
+  const page = await context.newPage();
+  try {
+    await page.goto('chrome://extensions-internals');
+    return JSON.parse(await page.evaluate(() => document.body.innerText)).find(item => item.id === extID);
+  } catch { return undefined; } finally { await page.close().catch(() => {}); }
+}
+
 (async () => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'golink-e2e-'));
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    channel: 'chromium',
-    headless: true,
-    args: [`--disable-extensions-except=${extPath}`, `--load-extension=${extPath}`],
-  });
+  const context = await chromium.launchPersistentContext(userDataDir, launchOptions());
   try {
-    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', {timeout: 15000});
-    const statusURL = `chrome-extension://${new URL(worker.url()).host}/status.html`;
+    const statusURL = `chrome-extension://${extID}/status.html`;
+    const findWorker = () => context.serviceWorkers().find(w => new URL(w.url()).host === extID);
+    if (installed) {
+      await check('I1', 'release is force-installed by policy from the real update_url', async () => {
+        let record;
+        for (let waited = 0; !record && waited < 120000; waited += 2000) {
+          record = await installedRecord(context);
+          if (!record) await sleep(2000);
+        }
+        assert.ok(record, `extension ${extID} was not installed from ${manifest.update_url}`);
+        assert.equal(record.location, 'EXTERNAL_POLICY_DOWNLOAD');
+        assert.deepEqual(record.disable_reasons, []);
+        console.log(`     installed release ${record.version} of ${record.name}`);
+      });
+    } else {
+      findWorker() ?? await context.waitForEvent('serviceworker', {timeout: 15000});
+    }
     const page = await context.newPage();
 
     const text = id => page.locator(id).textContent();
@@ -129,6 +180,12 @@ function report(r) {
       assert.equal(await text('#cached-owner'), 'tagged-devices');
     });
     await check('F4', 'auth key is not in extension storage', async () => {
+      if (!findWorker()) {
+        await page.goto(statusURL);
+        await context.waitForEvent('serviceworker', {timeout: 15000}).catch(() => {});
+      }
+      const worker = findWorker();
+      assert.ok(worker, 'extension service worker is not running');
       const dump = await worker.evaluate(async () => JSON.stringify(await chrome.storage.local.get(null)));
       assert.ok(!dump.includes('tskey'), 'storage contains an auth key');
     });
