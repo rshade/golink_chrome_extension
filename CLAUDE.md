@@ -20,11 +20,39 @@ go test ./...                 # golinkclient against a real dev-mode golink
 GOOS=js GOARCH=wasm go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./wasm
 node --test                   # tests/*.test.js, fake Chrome APIs, no npm deps
 node scripts/wasm-smoke.cjs   # after build.sh: exported Go API, no network
+mise run test-browser         # real Chromium loads ext/; needs `mise run browser-setup`
+mise run test-e2e             # real tailnet; see "Real tailnet run" below
 scripts/test-bundle.sh        # needs a clean tree; writes dist/
 ```
 
 Run all of them before committing; CI (`.github/workflows/build.yml`) runs the
 same set and also checks that `go list -deps ./wasm` has no golink or SQLite.
+
+## Real tailnet run
+
+`scripts/browser-e2e.cjs` covers the auth-key checks of the testing doc (B, C,
+F). Interactive login (A) and Chrome restarts (E) stay manual.
+
+1. The tailnet needs `tag:golink` and `tag:golink-ext` (see
+   `testdata/e2e/policy.hujson`), MagicDNS, and HTTPS certificates.
+2. Build the pinned server: `go build -o golink github.com/tailscale/golink/cmd/golink`.
+   Start it with a `tag:golink` auth key in `TS_AUTHKEY`, `-snapshot
+   testdata/e2e/links.jsonl`, and a `-config-dir` it keeps.
+3. Export a `tag:golink-ext` auth key as `GOLINK_E2E_AUTHKEY` and run
+   `mise run test-e2e`. The key is never written to disk or extension storage.
+
+Hard-won facts:
+
+- `wasmtags` removes `ts_omit_bakedroots` from tsconnect's tags. js/wasm has no
+  system roots, so without the baked-in Let's Encrypt roots every HTTPS golink
+  fails with `x509: certificate signed by unknown authority`, and the popup says
+  only "Golink is unreachable. Check ACL access". Unit tests and the no-network
+  smoke cannot see this; only a real tailnet does.
+- Tailscale rejects punctuation in auth key descriptions.
+- `wasm_exec.js` rejects environments over 8 KB; `test-wasm` runs under
+  `env -i` for that reason.
+- Unknown links pass through `status.html#...` before `?create=...`; wait for
+  the message text, not for the form to appear.
 
 ## Layout
 

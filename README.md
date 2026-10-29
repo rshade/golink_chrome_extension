@@ -4,7 +4,7 @@ A Chrome extension that embeds a Tailscale node in WebAssembly to resolve and sa
 
 ## Build and load
 
-Use Linux or another environment supported by Go, Go 1.27.3 as specified in `go.mod`, Node.js 22, and Chrome 116 or later. Chrome 156 was used for the browser checks below. There are no npm dependencies. The local verification environment used Node 18.19.1; Node 22 is recommended and configured in CI.
+Use Linux or another environment supported by Go, Go 1.27.3 as specified in `go.mod`, Node.js 24, and Chrome 116 or later. Chrome 156 was used for the browser checks below. The extension has no runtime npm dependencies; `playwright-core` is a dev dependency of `scripts/browser-smoke.cjs`. [mise](https://mise.jdx.dev) pins Go and Node: `mise install`, then `mise run ci`.
 
 From the repository root:
 
@@ -69,7 +69,7 @@ The node setup and Promise helpers adapt `cmd/tsconnect/wasm/wasm_js.go` from th
 
 ## CI
 
-[build.yml](.github/workflows/build.yml) runs Go tests, the js/wasm Go tests in `wasm/`, the WASM build and smoke test, Node tests, and a WASM dependency check on pushes and pull requests. It uses Go from `go.mod` and Node 22. Monday at 09:23 UTC, the scheduled matrix checks both pinned dependencies and `tailscale.com@latest` with `go mod tidy`. Both modes run the same checks. The latest mode changes only its job checkout and does not commit dependency updates. Manual dispatch checks the pinned dependencies.
+[build.yml](.github/workflows/build.yml) runs Go tests, the js/wasm Go tests in `wasm/`, the WASM build and smoke test, Node tests, and a WASM dependency check on pushes and pull requests. It installs Go and Node 24 through mise and runs `mise run ci`, which also loads the extension into headless Chromium. Monday at 09:23 UTC, the scheduled matrix checks both pinned dependencies and `tailscale.com@latest` with `go mod tidy`. Both modes run the same checks. The latest mode changes only its job checkout and does not commit dependency updates. Manual dispatch checks the pinned dependencies.
 
 The schedule starts only after the workflow exists on the default branch. Enable GitHub Actions failure notifications for this repository in your GitHub notification settings and inspect the Actions tab after scheduled runs. Check that schedules remain enabled, especially after repository inactivity. A latest failure calls for reviewing upstream internals and the copied setup code; it does not automatically update the pin. Review action versions when updating this workflow, and use full action SHAs if repository policy requires them. Local checks do not establish that GitHub CI or the latest-dependency job has run.
 

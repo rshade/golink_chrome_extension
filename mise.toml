@@ -1,6 +1,6 @@
 [tools]
 go = "1.27.3"
-node = "22"
+node = "24"
 
 [tasks.build]
 description = "Build ext/main.wasm and ext/wasm_exec.js"
@@ -35,6 +35,11 @@ run = ["npm ci", "npx playwright-core install chromium"]
 description = "Load ext/ into real Chromium and check start-up, WASM node, status page"
 depends = ["build"]
 run = "node scripts/browser-smoke.cjs"
+
+[tasks.test-e2e]
+description = "Drive the extension against a golink on a real tailnet (needs GOLINK_E2E_AUTHKEY)"
+depends = ["build"]
+run = "node scripts/browser-e2e.cjs"
 
 [tasks.test-bundle]
 description = "Write the portable test bundle to dist/ (needs a clean tree)"
