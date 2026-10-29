@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright-core');
+const {extensionID} = require('./extension-id.cjs');
 
 const extPath = path.resolve('ext');
 const workerRequest = method => ({channel: 'golink', target: 'worker', method, args: []});
@@ -21,6 +22,8 @@ const workerRequest = method => ({channel: 'golink', target: 'worker', method, a
   try {
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', {timeout: 15000});
     const extensionId = new URL(worker.url()).host;
+    const manifest = JSON.parse(fs.readFileSync(path.join(extPath, 'manifest.json'), 'utf8'));
+    assert.equal(extensionId, extensionID(manifest.key), 'Chrome derives the ID from the manifest key');
     const offscreenDocuments = () => worker.evaluate(async () =>
       (await chrome.runtime.getContexts({contextTypes: ['OFFSCREEN_DOCUMENT']})).map(c => c.documentUrl));
 
