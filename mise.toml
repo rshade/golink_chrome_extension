@@ -47,6 +47,10 @@ description = "Force-install a signed CRX by policy in Chrome for Testing, then 
 depends = ["build"]
 run = "scripts/check-install.sh"
 
+[tasks.test-release]
+description = "Force-install the published release into Google Chrome, then run the real-tailnet checks (needs GOLINK_E2E_AUTHKEY)"
+run = "scripts/check-release.sh"
+
 [tasks.package]
 description = "Build, then pack a signed CRX and zip into dist/release (needs RELEASE_KEY_FILE)"
 depends = ["build"]
