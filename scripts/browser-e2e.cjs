@@ -16,6 +16,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright-core');
 const {extensionID} = require('./extension-id.cjs');
+const {assertPrivateEtcOpt} = require('./private-etc.cjs');
 
 const authKey = process.env.GOLINK_E2E_AUTHKEY;
 if (!authKey) { console.error('GOLINK_E2E_AUTHKEY is required'); process.exit(2); }
@@ -47,9 +48,7 @@ function launchOptions() {
   if (!installed) {
     return {channel: 'chromium', headless: true, args: [`--disable-extensions-except=${extPath}`, `--load-extension=${extPath}`]};
   }
-  if (process.env.GOLINK_E2E_PRIVATE_ETC !== '1') {
-    throw new Error('installed mode writes a browser policy file; run it through scripts/check-release.sh');
-  }
+  assertPrivateEtcOpt();
   const policyDir = '/etc/opt/chrome/policies/managed';
   fs.mkdirSync(policyDir, {recursive: true});
   // Chrome blocks DevTools, and so Playwright, on force-installed extensions by default and

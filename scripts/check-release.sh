@@ -6,5 +6,5 @@
 # there keeps the policy file off the host.
 set -eu
 cd "$(dirname "$0")/.."
-export GOLINK_E2E_INSTALLED=1 GOLINK_E2E_PRIVATE_ETC=1
-exec unshare --user --map-root-user --mount sh -c 'mount -t tmpfs tmpfs /etc/opt; exec node scripts/browser-e2e.cjs'
+export GOLINK_E2E_INSTALLED=1
+exec unshare --user --map-root-user --mount sh -ec 'mount -t tmpfs tmpfs /etc/opt && exec node scripts/browser-e2e.cjs'
