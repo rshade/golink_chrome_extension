@@ -1,0 +1,29 @@
+name: e2e
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '41 9 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: e2e-tailnet
+  cancel-in-progress: false
+jobs:
+  tailnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: e2e-tailnet
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - run: mise run browser-setup
+      - name: Install Chromium system libraries
+        run: npx playwright-core install-deps chromium
+      - name: Run the extension against golink on the test tailnet
+        run: mise run test-e2e-minted
+        env:
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_OAUTH_CLIENT_SECRET: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
+          TS_TAILNET: ${{ vars.TS_TAILNET }}

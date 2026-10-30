@@ -26,7 +26,7 @@ p { margin: 10px 0; overflow-wrap: anywhere; }
 }
 #identity, .help, #no-cached-link { color: #535b67; }
 .help { font-size: 0.85rem; margin: 5px 0 12px; }
-form, #ui-panel { margin-top: 20px; }
+form, #ui-panel, #links-panel { margin-top: 20px; }
 label { display: block; margin: 12px 0 5px; font-weight: 600; }
 input, button { font: inherit; border-radius: 6px; }
 input { width: 100%; padding: 9px 10px; border: 1px solid #8993a0; background: #fff; color: inherit; }
@@ -45,6 +45,11 @@ summary { cursor: pointer; color: #244e73; }
 .path, dd { overflow-wrap: anywhere; }
 dt { font-weight: 600; margin-top: 10px; }
 dd { margin-left: 0; }
+#links-list { list-style: none; margin: 8px 0; padding: 0; height: 16rem; overflow-y: auto; border: 1px solid #cdd2da; border-radius: 6px; }
+#links-list li { display: grid; padding: 7px 10px; border-bottom: 1px solid #cdd2da; overflow-wrap: anywhere; }
+#links-list li:last-child { border-bottom: 0; }
+#links-list a { font-weight: 600; color: #1a5b93; }
+#links-list span { font-size: 0.85rem; color: #535b67; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (min-width: 500px) {
   body { width: auto; }
@@ -61,4 +66,7 @@ dd { margin-left: 0; }
   #error { background: #46282a; color: #ffbdb7; }
   #warning { background: #413620; color: #ffda90; }
   details { border-color: #59616e; }
+  #links-list, #links-list li { border-color: #59616e; }
+  #links-list a { color: #a9cfee; }
+  #links-list span { color: #bac2ce; }
 }

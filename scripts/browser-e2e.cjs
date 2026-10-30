@@ -161,6 +161,12 @@ async function installedRecord(context) {
       await page.locator('#message', {hasText: 'Link saved.'}).waitFor({timeout: 30000});
       await landsOn(`http://go/${created}`, 'https://example.org/');
     });
+    await check('C7', 'saved link appears in the status page list', async () => {
+      await page.goto(statusURL);
+      await page.locator('#links-list a', {hasText: created}).waitFor({timeout: 30000});
+      await page.locator('#links-filter').fill(created);
+      assert.equal(await page.locator('#links-list li').count(), 1);
+    });
     const replacement = `https://example.com/new-${suffix}`;
     await check('C4', 'saving over an existing link asks first', async () => {
       await save('ext-replace', replacement);

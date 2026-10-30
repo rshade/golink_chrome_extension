@@ -39,6 +39,8 @@ Use the omnibox by typing `go`, pressing Tab or Space to activate the keyword, a
 
 Fragments carry over, so `http://go/wiki#setup` opens the destination at `#setup` unless the link's target has its own fragment. A link whose target is another go link, such as `/other` or `http://go/other`, is followed inside the extension, up to ten hops.
 
+The popup and a bare status page list all go links under the save form, with a filter box. Click a name to open `http://go/<name>`. The list reads the same local cache as autocomplete, so it adds no tailnet traffic and filtering sends nothing. It shows at most 200 matches at a time; filter to find the rest. Golink remains the only store: the extension keeps no links of its own, and the cache can lag a change made directly in golink by up to five minutes.
+
 To save the current tab, open the popup on an ordinary web page, enter a short name, check the prefilled target, and save. The target can be a URL, a path to another go link, or a golink template. If the name already exists, the popup shows its current target and saves only after you click **Replace existing link**. A replacement changes the link for everyone in the tailnet. An unknown link opens a save form with the missing name prefilled. A name ending in `+` shows the cached link and explains how to use golink's web UI. Autocomplete ranks prefixes before substrings using a local cache. Typing does not initiate tailnet traffic. The cache becomes stale after five minutes and refreshes during node activity and after a successful save. If a refresh fails after saving, the UI reports that warning separately from the successful save.
 
 ## Tailnet access and identity
@@ -68,7 +70,7 @@ Auth keys pass through memory for registration. The extension clears the input o
 ## Limits and upstream maintenance
 
 - The browser node uses DERP relays over WebSocket only, without direct UDP paths. Lookups can be slower than native Tailscale.
-- A destination available only inside the tailnet still requires native Tailscale to load in a normal browser tab. Golink's browse, edit, and delete web UI also requires native Tailscale. The extension provides resolve, save, and cached suggestions.
+- A destination available only inside the tailnet still requires native Tailscale to load in a normal browser tab. Golink's browse, edit, and delete web UI also requires native Tailscale. The extension provides resolve, save, cached suggestions, and a read-only list of links.
 - Browser navigation accepts HTTP and HTTPS targets. The Go client preserves redirect `Location` values and path/query escaping, but other destination schemes are rejected at the navigation boundary.
 - After two fatal node exits within 60 seconds, automatic recovery stops. Use **Reset device** to permit immediate recovery or retry after the window expires.
 - `tailscale.com` is pinned to `v1.104.4`. It still predates upstream fix [`0f3c767d1`](https://github.com/tailscale/tailscale/commit/0f3c767d1) for devices deleted from the admin console. A deleted or cleaned-up ephemeral device can still appear `Running` while golink is unreachable. Use **Reset device** to return to `NeedsLogin`, then register again.
