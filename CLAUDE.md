@@ -43,6 +43,14 @@ F). Interactive login (A) and Chrome restarts (E) stay manual.
 3. Export a `tag:golink-ext` auth key as `GOLINK_E2E_AUTHKEY` and run
    `mise run test-e2e`. The key is never written to disk or extension storage.
 
+`mise run test-e2e-minted` does steps 2 and 3 from one OAuth client
+(`TS_OAUTH_CLIENT_ID`/`TS_OAUTH_CLIENT_SECRET`): it mints ephemeral keys with
+`scripts/mint-authkey.cjs`, starts golink, and runs the checks. Locally the
+client lives in a Pulumi ESC environment (`pulumi env run <env> -- mise run
+test-e2e-minted`); CI uses the `e2e-tailnet` environment's secrets in
+`.github/workflows/e2e.yml`. Never read or print the secret. Setup is in
+`docs/e2e-credentials.md`.
+
 Hard-won facts:
 
 - `wasmtags` removes `ts_omit_bakedroots` from tsconnect's tags. js/wasm has no

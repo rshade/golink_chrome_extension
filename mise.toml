@@ -42,6 +42,11 @@ description = "Drive the extension against a golink on a real tailnet (needs GOL
 depends = ["build"]
 run = "node scripts/browser-e2e.cjs"
 
+[tasks.test-e2e-minted]
+description = "Mint ephemeral keys from a Tailscale OAuth client, start golink, and run test-e2e (needs TS_OAUTH_CLIENT_ID/SECRET)"
+depends = ["build"]
+run = "scripts/run-e2e.sh"
+
 [tasks.test-install]
 description = "Force-install a signed CRX by policy in Chrome for Testing, then update it (private mount namespace)"
 depends = ["build"]
