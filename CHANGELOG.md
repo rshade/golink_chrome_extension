@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/rshade/golink_chrome_extension/compare/v0.1.0...v0.2.0) (2026-10-30)
+
+
+### Features
+
+* list all go links on the status page once connected ([#24](https://github.com/rshade/golink_chrome_extension/issues/24)) ([4212796](https://github.com/rshade/golink_chrome_extension/commit/421279625210670c3f07c14f495a94a2e33846b3))
+
 ## 0.1.0 (2026-10-29)
 
 
