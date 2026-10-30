@@ -275,7 +275,7 @@ test('login, logout, and reset use worker actions and refresh status', async () 
   await f.handlers.login();
   await f.handlers.logout();
   await f.handlers.reset();
-  assert.deepEqual(f.calls.map(([method]) => method), ['status', 'login', 'status', 'logout', 'status', 'reset', 'status']);
+  assert.deepEqual(f.calls.map(([method]) => method).filter(method => method !== 'cachedLinks'), ['status', 'login', 'status', 'logout', 'status', 'reset', 'status']);
   assert.equal(f.timers.size, 1);
   f.controller.dispose();
 });
@@ -285,7 +285,7 @@ test('typing has no registered request handler and no network effect', async () 
   await f.controller.start();
   assert.equal(f.handlers.input, undefined);
   assert.equal(f.handlers.change, undefined);
-  assert.deepEqual(f.calls, [['status', []]]);
+  assert.deepEqual(f.calls, [['status', []], ['cachedLinks', []]]);
   f.controller.dispose();
 });
 
@@ -314,7 +314,7 @@ test('disposing a scheduled refresh cancels it and prevents later actions', asyn
   await f.handlers.reset();
   await f.handlers.retry();
   assert.equal(f.timers.size, 0);
-  assert.deepEqual(f.calls, [['status', []]]);
+  assert.deepEqual(f.calls, [['status', []], ['cachedLinks', []]]);
 });
 
 test('unknown state names cannot inherit labels from Object.prototype', async () => {
@@ -334,10 +334,12 @@ function documentFixture() {
         addEventListener(type, handler) { this.listeners.set(type, handler); },
         removeEventListener(type, handler) { if (this.listeners.get(type) === handler) this.listeners.delete(type); },
         set innerHTML(value) { throw new Error('Do not use HTML for untrusted text'); },
+        replaceChildren(...items) { this.children = items; },
       });
       return nodes.get(id);
     },
     querySelectorAll: () => [...nodes.values()],
+    createElement: tag => ({ tag, textContent: '', href: '', children: [], dataset: {}, append(...items) { this.children.push(...items); }, setAttribute(name, value) { this[name] = value; } }),
   };
   return { document, get: id => document.getElementById(id) };
 }
@@ -410,4 +412,142 @@ test('reset clears an invalidated deferred resolve spinner before NeedsLogin', a
   assert.equal(resolves, 2);
   assert.equal(f.last.resolving, false);
   f.controller.dispose();
+});
+
+const link = (short, long = `https://example.com/${short}`, owner = 'person@example.com') => ({ short, long, owner });
+const linksFixture = (links, extra = {}) => fixture({ ...extra, reply: (method, args) => {
+  if (method === 'cachedLinks') return { fetchedAt: links.length || extra.fetchedAt ? Date.now() : 0, links };
+  return extra.reply ? extra.reply(method, args) : status('Running');
+} });
+
+test('a connected popup lists every cached link sorted by name beside the save form', async () => {
+  const f = linksFixture([link('zeta'), link('Alpha'), link('docs')]);
+  await f.controller.start();
+  assert.equal(f.last.showSave, true);
+  assert.equal(f.last.showLinks, true);
+  assert.deepEqual(f.last.linkRows.map(row => row.short), ['Alpha', 'docs', 'zeta']);
+  assert.equal(f.last.linkRows[0].owner, 'person@example.com');
+  assert.equal(f.last.linksNote, '');
+  f.controller.dispose();
+});
+
+test('the link list is hidden for resolve, create, golink UI and error pages and before Running', async () => {
+  for (const search of ['?resolve=foo', '?create=foo', '?error=timeout']) {
+    const f = linksFixture([link('docs')], { search });
+    await f.controller.start();
+    assert.equal(f.last.showLinks, false, search);
+    assert.equal(f.calls.some(([method]) => method === 'cachedLinks'), false, search);
+    f.controller.dispose();
+  }
+  const f = linksFixture([link('docs')], { reply: method => method === 'status' ? status('NeedsLogin') : undefined });
+  await f.controller.start();
+  assert.equal(f.last.showLinks, false);
+  assert.equal(f.calls.some(([method]) => method === 'cachedLinks'), false);
+  f.controller.dispose();
+});
+
+test('filtering matches name, target and owner without case and sends no request', async () => {
+  const f = linksFixture([link('docs', 'https://example.com/handbook', 'ann@example.com'), link('wiki', 'https://wiki.example.com', 'bob@example.com'), link('Handbook-2')]);
+  await f.controller.start();
+  const calls = f.calls.length;
+  f.handlers.filter('HANDBOOK');
+  assert.deepEqual(f.last.linkRows.map(row => row.short), ['docs', 'Handbook-2']);
+  f.handlers.filter('bob@');
+  assert.deepEqual(f.last.linkRows.map(row => row.short), ['wiki']);
+  f.handlers.filter('nothing');
+  assert.deepEqual(f.last.linkRows, []);
+  assert.match(f.last.linksNote, /no links match/i);
+  assert.equal(f.calls.length, calls);
+  f.controller.dispose();
+});
+
+test('a cache with no links explains that none exist, and an unloaded cache says so', async () => {
+  const empty = fixture({ reply: method => method === 'cachedLinks' ? { fetchedAt: 1, links: [] } : status('Running') });
+  await empty.controller.start();
+  assert.match(empty.last.linksNote, /no go links yet/i);
+  empty.controller.dispose();
+  const unloaded = fixture({ reply: method => method === 'cachedLinks' ? { fetchedAt: 0, links: [] } : status('Running') });
+  await unloaded.controller.start();
+  assert.match(unloaded.last.linksNote, /not loaded/i);
+  assert.equal(unloaded.last.showSave, true);
+  unloaded.controller.dispose();
+});
+
+test('a failed cache read reports it in the list but keeps the save form and polling', async () => {
+  const f = fixture({ reply: method => {
+    if (method === 'cachedLinks') throw Object.assign(new Error('worker gone'), { kind: 'timeout' });
+    return status('Running');
+  } });
+  await f.controller.start();
+  assert.match(f.last.linksNote, /could not load.*timed out/i);
+  assert.equal(f.last.showSave, true);
+  assert.equal(f.last.error, '');
+  assert.equal(f.timers.size, 1);
+  f.controller.dispose();
+});
+
+test('the list picks up a saved link', async () => {
+  const links = [link('docs')];
+  const f = fixture({ reply: (method, args) => {
+    if (method === 'cachedLinks') return { fetchedAt: links.length, links: [...links] };
+    if (method === 'save') { links.push(link(args[0], args[1])); return { ok: true }; }
+    return status('Running');
+  } });
+  await f.controller.start();
+  assert.deepEqual(f.last.linkRows.map(row => row.short), ['docs']);
+  await f.handlers.save({ short: 'new', long: 'https://example.org' });
+  assert.deepEqual(f.last.linkRows.map(row => row.short), ['docs', 'new']);
+  f.controller.dispose();
+});
+
+test('a list of 5000 links renders at most 200 rows and says how to see the rest', async () => {
+  const f = linksFixture(Array.from({ length: 5000 }, (_, index) => link(`link-${String(index).padStart(4, '0')}`)));
+  await f.controller.start();
+  assert.equal(f.last.linkRows.length, 200);
+  assert.equal(f.last.linkTotal, 5000);
+  assert.equal(f.last.linkMatches, 5000);
+  assert.match(f.last.linksNote, /200 of 5000.*filter/i);
+  f.handlers.filter('link-4999');
+  assert.deepEqual(f.last.linkRows.map(row => row.short), ['link-4999']);
+  assert.equal(f.last.linksNote, '');
+  f.controller.dispose();
+});
+
+test('DOM view renders links as text with a go URL and leaves the filter box alone', () => {
+  const f = documentFixture();
+  const view = createDOMView(f.document);
+  f.get('links-filter').value = 'ty';
+  view.render({ showLinks: true, linkRows: [link('<b>x/y</b>', 'https://example.com/<script>', '<owner>')], linkTotal: 1, linkMatches: 1, linksNote: '' });
+  assert.equal(f.get('links-panel').hidden, false);
+  assert.equal(f.get('links-filter').value, 'ty');
+  const [item] = f.get('links-list').children;
+  const [anchor, target, owner] = item.children;
+  assert.equal(anchor.textContent, '<b>x/y</b>');
+  assert.equal(anchor.href, 'http://go/%3Cb%3Ex%2Fy%3C%2Fb%3E');
+  assert.equal(target.textContent, 'https://example.com/<script>');
+  assert.equal(owner.textContent, '<owner>');
+});
+
+test('DOM view binds the filter box to the filter handler', () => {
+  const f = documentFixture();
+  const view = createDOMView(f.document);
+  const seen = [];
+  const unbind = view.bind({ filter: value => seen.push(value), login() {}, logout() {}, reset() {}, retry() {} });
+  f.get('links-filter').value = 'doc';
+  f.get('links-filter').listeners.get('input')();
+  assert.deepEqual(seen, ['doc']);
+  unbind();
+  assert.equal(f.get('links-filter').listeners.size, 0);
+});
+
+test('DOM view keeps the rendered rows when the same list is rendered again', () => {
+  const f = documentFixture();
+  const view = createDOMView(f.document);
+  const model = { showLinks: true, linkRows: [link('docs')], linkTotal: 1, linkMatches: 1, linksNote: '' };
+  view.render(model);
+  const rows = f.get('links-list').children;
+  view.render({ ...model });
+  assert.equal(f.get('links-list').children, rows);
+  view.render({ ...model, linkRows: [link('docs')] });
+  assert.notEqual(f.get('links-list').children, rows);
 });

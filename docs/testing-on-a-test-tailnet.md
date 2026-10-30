@@ -171,6 +171,7 @@ then type the rest.
 | C4 | In the popup, save `ext-replace` → `https://example.com/new`. | Warning: `go/ext-replace already points to https://example.com/old. Replace it for everyone in the tailnet?` and a **Replace existing link** button. Nothing changed yet: `http://go/ext-replace` still goes to `/old`. | |
 | C5 | Click **Replace existing link**. | `Link saved.` `http://go/ext-replace` now goes to `/new`. | |
 | C6 | `http://go/ext-new-1+` | Cached link shows **Owner** = your login. | |
+| C7 | Click the toolbar icon, type `ext-new` in **Filter links**. | **All go links** lists `ext-new-1` and `ext-new-2` with targets and owner; typing sends no request. Clicking a name opens `http://go/<name>`. | |
 
 ### D. Autocomplete
 

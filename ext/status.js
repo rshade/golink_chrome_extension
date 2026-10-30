@@ -18,16 +18,52 @@ function errorText(error) {
 // golink matches short names without case or dashes.
 const linkID = short => short.toLowerCase().replaceAll('-', '');
 
+const maxLinkRows = 200;
+
 export function createStatusController({ rpc, view, location, activeTab, setTimer = setTimeout, clearTimer = clearTimeout }) {
   let disposed = false, started = false, timer, refreshing, unbind;
   let pending = null, fragment = null, resolved = false, paused = false, generation = 0, mode = 'popup';
+  let allLinks = [], linksFetchedAt = null, linksFailed = '', filterText = '';
   const model = {
     state: 'Starting', status: 'Connecting…', connecting: true, resolving: false, busy: false,
     showLogin: false, showAuthKey: false, showSave: false, showReplace: false, showLogout: false, showReset: false,
     identity: '', reachability: '', error: '', message: '', warning: '', uiMessage: '', uiPath: '', cachedLink: null,
+    showLinks: false, linkRows: [], linkTotal: 0, linkMatches: 0, linksNote: '',
   };
   const render = () => { if (!disposed) view.render({ ...model }); };
   const cancel = () => { if (timer !== undefined) clearTimer(timer); timer = undefined; };
+
+  function applyLinks() {
+    const needle = filterText.trim().toLowerCase();
+    const matches = needle ? allLinks.filter(item => [item.short, item.long, item.owner].some(field => field?.toLowerCase().includes(needle))) : allLinks;
+    let note = '';
+    if (linksFailed) note = linksFailed;
+    else if (!linksFetchedAt) note = 'The link list has not loaded yet. It loads after connecting; if it stays empty, check that golink is reachable.';
+    else if (!allLinks.length) note = 'No go links yet. Save one above.';
+    else if (!matches.length) note = 'No links match the filter.';
+    else if (matches.length > maxLinkRows) note = `Showing ${maxLinkRows} of ${matches.length} links. Use the filter to narrow the list.`;
+    Object.assign(model, { linkRows: matches.slice(0, maxLinkRows), linkTotal: allLinks.length, linkMatches: matches.length, linksNote: note });
+  }
+
+  async function loadLinks(version) {
+    let cache, failure = '';
+    try {
+      cache = await rpc('cachedLinks', []);
+      if (!Array.isArray(cache?.links)) failure = 'Could not load links. The extension returned an unexpected reply.';
+    } catch (error) { failure = `Could not load links. ${errorText(error)}`; }
+    if (disposed || version !== generation) return;
+    if (failure) {
+      if (failure === linksFailed) return;
+      linksFailed = failure;
+    } else if (!linksFailed && cache.fetchedAt === linksFetchedAt) return;
+    else {
+      linksFailed = '';
+      linksFetchedAt = cache.fetchedAt;
+      allLinks = [...cache.links].sort((a, b) => a.short.localeCompare(b.short));
+    }
+    applyLinks();
+    render();
+  }
 
   function showError(error) {
     if (disposed) return;
@@ -44,6 +80,7 @@ export function createStatusController({ rpc, view, location, activeTab, setTime
       connecting: state === 'NoState' || state === 'Starting',
       showLogin: state === 'NeedsLogin' || state === 'Stopped',
       showAuthKey: state === 'NeedsLogin', showSave: state === 'Running' && mode !== 'golinkUI',
+      showLinks: state === 'Running' && mode === 'popup',
       showLogout: state === 'Running',
       showReset: state === 'Running' || state === 'NeedsMachineAuth' || !Object.hasOwn(stateLabels, state),
       identity: state === 'Running' ? [value.loginName, value.tailnet, value.hostname].filter(Boolean).join(' · ') : '',
@@ -62,6 +99,8 @@ export function createStatusController({ rpc, view, location, activeTab, setTime
         if (disposed || version !== generation) return;
         showStatus(value);
         render();
+        if (model.showLinks) await loadLinks(version);
+        if (disposed || version !== generation) return;
         if (value.state === 'Running' && pending !== null && !resolved) {
           model.resolving = true;
           render();
@@ -144,6 +183,7 @@ export function createStatusController({ rpc, view, location, activeTab, setTime
       unbind = view.bind({
         login: () => action('login'), logout: () => action('logout'), reset: () => action('reset'), retry,
         authKey(key) { view.clearAuthKey(); return action('authKey', [key]); },
+        filter(text) { filterText = text; applyLinks(); render(); },
         save: ({ short, long }) => action('save', [short, long, false]),
         replace: ({ short, long }) => action('save', [short, long, true]),
         configure: ({ golinkHost, controlURL }) => action('configure', [{
@@ -193,6 +233,7 @@ export function createDOMView(document) {
   const get = id => document.getElementById(id);
   const text = (id, value = '') => { get(id).textContent = value; };
   const visible = (id, show) => { get(id).hidden = !show; };
+  let renderedRows;
   return {
     prefill(fields) { for (const [id, value] of Object.entries(fields)) get(id).value = value; },
     clearAuthKey() { get('auth-key').value = ''; },
@@ -214,6 +255,25 @@ export function createDOMView(document) {
       visible('ui-panel', Boolean(model.uiMessage));
       text('ui-message', model.uiMessage || '');
       text('ui-path', model.uiPath || '');
+      visible('links-panel', Boolean(model.showLinks));
+      if (model.linkRows !== renderedRows) {
+        renderedRows = model.linkRows;
+        get('links-list').replaceChildren(...(model.linkRows ?? []).map(item => {
+          const row = document.createElement('li');
+          const name = document.createElement('a');
+          name.textContent = item.short;
+          name.href = `http://go/${encodeURIComponent(item.short)}`;
+          name.setAttribute('target', '_blank');
+          const target = document.createElement('span');
+          target.textContent = item.long;
+          const owner = document.createElement('span');
+          owner.textContent = item.owner || '';
+          row.append(name, target, owner);
+          return row;
+        }));
+      }
+      text('links-note', model.linksNote || '');
+      visible('links-note', Boolean(model.linksNote));
       visible('cached-link', Boolean(model.cachedLink));
       visible('no-cached-link', Boolean(model.uiMessage && !model.cachedLink));
       for (const key of ['short', 'long', 'owner']) text(`cached-${key}`, model.cachedLink?.[key] || '');
@@ -232,6 +292,7 @@ export function createDOMView(document) {
         event.preventDefault();
         return handlers.save({ short: get('short').value, long: get('long').value });
       });
+      on('links-filter', 'input', () => handlers.filter(get('links-filter').value));
       on('replace', 'click', () => handlers.replace({ short: get('short').value, long: get('long').value }));
       on('settings-form', 'submit', event => {
         event.preventDefault();

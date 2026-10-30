@@ -33,6 +33,14 @@
       <button type="submit">Save link</button>
       <button id="replace" class="secondary" type="button" hidden>Replace existing link</button>
     </form>
+    <section id="links-panel" aria-labelledby="links-heading" hidden>
+      <h2 id="links-heading">All go links</h2>
+      <label for="links-filter">Filter links</label>
+      <input id="links-filter" type="search" placeholder="Name, target or owner" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <p id="links-note" class="help" role="status" hidden></p>
+      <ul id="links-list"></ul>
+      <p class="help">Type <code>go/name</code> in the address bar or the omnibox to open a link. Editing and deleting need golink's web UI with native Tailscale.</p>
+    </section>
     <section id="ui-panel" aria-labelledby="ui-heading" hidden>
       <h2 id="ui-heading">Open golink's web UI</h2>
       <p id="ui-message"></p>

@@ -268,6 +268,15 @@ Flow:
    - `golinkUI`: `status.html?golinkUI=<path>`, which explains that golink's
      web UI needs native Tailscale and shows the link from `linksCache`,
      matched case- and dash-insensitively as golink does.
+   - A bare status page and the popup, once `Running`, also list all go links
+     under the save form: name, target, owner, and a filter box. The list
+     comes from the `cachedLinks` RPC on each poll, so it adds no golink
+     request, and the page rebuilds it only when `fetchedAt` changes, which a
+     save does. Filtering is local. At most 200 matching rows render, with a
+     note to narrow the filter; the controller test covers 5000 links. A
+     failed cache read or a cache not yet loaded shows a note in the list and
+     leaves the save form usable. Resolve, create, golinkUI and error pages
+     do not show it. Names open `http://go/<name>` in a new tab.
    - `error`: shown on the same page with **Try again** and **Reset device**.
 
 ### Settings
@@ -436,7 +445,7 @@ throwing JS callback reports exactly one fatal.
   (including framed pages and the popup), login tab handling, links cache,
   resolve hops;
 - `status.js`: pending, create, golinkUI, and direct-capture modes, polling,
-  actions, settings, and error display.
+  actions, settings, the link list, and error display.
 
 ### WASM smoke test
 
