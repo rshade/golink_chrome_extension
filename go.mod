@@ -3,7 +3,7 @@ module golink-chrome-extension
 go 1.27.3
 
 require (
-	github.com/tailscale/golink v1.0.1-0.20261027153909-d02fb073fd1c
+	github.com/tailscale/golink v1.0.1-0.20261110155649-d4c752ba2a71
 	tailscale.com v1.104.5
 )
 
@@ -28,7 +28,7 @@ require (
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jsimonetti/rtnetlink v1.4.2 // indirect
-	github.com/klauspost/compress v1.20.0 // indirect
+	github.com/klauspost/compress v1.20.4 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mdlayher/netlink v1.11.2 // indirect
 	github.com/mdlayher/socket v0.7.0 // indirect
