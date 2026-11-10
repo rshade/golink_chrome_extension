@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/tailscale/golink v1.0.1-0.20261027153909-d02fb073fd1c
-	tailscale.com v1.104.4
+	tailscale.com v1.104.5
 )
 
 require (
