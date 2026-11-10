@@ -124,6 +124,8 @@ github.com/kamstrup/intmap v0.5.2 h1:qnwBm1mh4XAnW9W9Ue9tZtTff8pS6+s6iKF6JRIV2Dk
 github.com/kamstrup/intmap v0.5.2/go.mod h1:gWUVWHKzWj8xpJVFf5GC0O26bWmv3GqdnIX/LMT6Aq4=
 github.com/klauspost/compress v1.20.0 h1:a3C1ke2ohxFymNlb2HWAHjDeKCI90scRskErZkR0ezA=
 github.com/klauspost/compress v1.20.0/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
+github.com/klauspost/compress v1.20.4 h1:dD0v/bvxtjCBqQu6sx1TNWkalEY5lNTIe+HY9w8TeNI=
+github.com/klauspost/compress v1.20.4/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
 github.com/kortschak/wol v0.0.0-20200729010619-da482cc4850a h1:+RR6SqnTkDLWyICxS1xpjCi/3dhyV+TgZwA6Ww3KncQ=
 github.com/kortschak/wol v0.0.0-20200729010619-da482cc4850a/go.mod h1:YTtCCM3ryyfiu4F7t8HQ1mxvp1UBdWM2r6Xa+nGWvDk=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=
@@ -190,6 +192,8 @@ github.com/tailscale/golink v1.0.1-0.20261021144816-8b59870a054f h1:3q9mbxbOWvyD
 github.com/tailscale/golink v1.0.1-0.20261021144816-8b59870a054f/go.mod h1:Rf5LIILBFiCfU6djrrahcNjwLQ77Q0Cw71IRd6CcWMw=
 github.com/tailscale/golink v1.0.1-0.20261027153909-d02fb073fd1c h1:Ic7sIHl62qppmRLSIs3aw956PzTi0RySZgNOU6cT3AA=
 github.com/tailscale/golink v1.0.1-0.20261027153909-d02fb073fd1c/go.mod h1:Rf5LIILBFiCfU6djrrahcNjwLQ77Q0Cw71IRd6CcWMw=
+github.com/tailscale/golink v1.0.1-0.20261110155649-d4c752ba2a71 h1:pBPRFrd5dY3Cy6VpKdaFk1MsAvH9Edlb6w/462zgJCc=
+github.com/tailscale/golink v1.0.1-0.20261110155649-d4c752ba2a71/go.mod h1:oxNqskngcaD8uVbhLBDrLR/FSdfDqwZ8X1AgQCr1yXI=
 github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f h1:9hiVElpCmKzsBKQHkBqZ8LGzt82iLfM8egxr4sew+Ys=
 github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f/go.mod h1:8/zr1Tv0+cKpVtGCEB/7YfRXr2TszsMxMXLaT8YuBgU=
 github.com/tailscale/netlink v1.1.1-0.20240822203006-4d49adab4de7 h1:uFsXVBE9Qr4ZoF094vE6iYTLDl0qCiKzYXlL6UeWObU=
