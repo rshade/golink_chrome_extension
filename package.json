@@ -1,1 +1,1 @@
-{"name":"golink-chrome-extension","private":true,"type":"module","scripts":{"test":"node --test"},"devDependencies":{"playwright-core":"1.65.0"}}
+{"name":"golink-chrome-extension","private":true,"type":"module","scripts":{"test":"node --test"},"devDependencies":{"playwright-core":"1.65.1"}}
